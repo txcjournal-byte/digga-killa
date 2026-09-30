@@ -68,7 +68,8 @@ struct TrackRowModel
 };
 
 /** One line of the LOOPS / ONE-SHOTS tracklist. */
-class TrackRow : public juce::Component
+class TrackRow : public juce::Component,
+                 public juce::SettableTooltipClient
 {
 public:
     enum class Style { loop, shot };
@@ -92,6 +93,8 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
@@ -101,6 +104,7 @@ private:
     Style style;
     TrackRowModel model;
     bool selected = false;
+    bool dragStarted = false;
     juce::Rectangle<float> nameArea, waveArea, durationArea;
 
     static constexpr int indentPerLevel = 51;

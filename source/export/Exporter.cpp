@@ -99,7 +99,9 @@ juce::File renderToTempFile (const Request& request)
     const auto folder = getExportFolder();
     folder.createDirectory();
     auto file = folder.getChildFile (request.fileName + ".wav");
-    file.deleteFile();
+    // a DAW may still hold an earlier drag of the same clip open: never fail, pick a new name
+    if (file.exists() && ! file.deleteFile())
+        file = file.getNonexistentSibling (false);
 
     juce::WavAudioFormat wav;
     std::unique_ptr<juce::OutputStream> stream (file.createOutputStream());

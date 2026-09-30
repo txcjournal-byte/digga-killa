@@ -17,6 +17,10 @@ public:
     void resized() override;
 
 private:
+    static int initialWidth (int savedWidth);
+
+    DiggaKillaProcessor& processor;
+    bool sizeReady = false;
     DiggaLookAndFeel lookAndFeel;
     MainView view;
 

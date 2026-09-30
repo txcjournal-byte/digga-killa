@@ -160,6 +160,7 @@ void TrackRow::setModel (TrackRowModel newModel)
     play.setRowSelected (selected);
     kill.setEnabled (live);
     handle.setEnabled (live);
+    setTooltip (live ? "Click to select, drag into your DAW" : juce::String());
     resized();
     repaint();
 }
@@ -200,6 +201,22 @@ void TrackRow::mouseDown (const juce::MouseEvent& e)
 
     if (onSelect)
         onSelect();
+}
+
+void TrackRow::mouseDrag (const juce::MouseEvent& e)
+{
+    // the whole row is a drag source: pull it into the DAW
+    if (! dragStarted && ! model.placeholder && ! e.mods.isPopupMenu() && e.getDistanceFromDragStart() > 6)
+    {
+        dragStarted = true;
+        if (onDragOut)
+            onDragOut();
+    }
+}
+
+void TrackRow::mouseUp (const juce::MouseEvent&)
+{
+    dragStarted = false;
 }
 
 void TrackRow::mouseDoubleClick (const juce::MouseEvent&)

@@ -210,6 +210,7 @@ void DiggaKillaProcessor::getStateInformation (juce::MemoryBlock& destData)
     juce::ValueTree root (stateType);
     root.setProperty ("version", stateVersion, nullptr);
     root.setProperty (samplePathProperty, sampleStore.getInfo().file.getFullPathName(), nullptr);
+    root.setProperty ("editorWidth", editorWidth.load(), nullptr);
     root.addChild (parameters.copyState(), -1, nullptr);
     root.addChild (engine.getState(), -1, nullptr);
 
@@ -226,6 +227,8 @@ void DiggaKillaProcessor::setStateInformation (const void* data, int sizeInBytes
     const auto root = juce::ValueTree::fromXml (*xml);
     if (! root.hasType (stateType))
         return;
+
+    editorWidth.store ((int) root.getProperty ("editorWidth", 0));
 
     const auto params = root.getChildWithName (parameters.state.getType());
     if (params.isValid())

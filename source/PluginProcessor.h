@@ -71,6 +71,10 @@ public:
     dsp::FxParams getFxParams() const noexcept;
     bool isReverseOn() const noexcept { return reverseParam->load() > 0.5f; }
 
+    /** Editor width the user last chose (0 = never resized); saved with the project. */
+    int getEditorWidth() const noexcept { return editorWidth.load(); }
+    void setEditorWidth (int width) noexcept { editorWidth.store (width); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void timerCallback() override;
@@ -93,7 +97,8 @@ private:
 
     std::atomic<double> hostBpm { 0.0 };
     std::atomic<double> currentSampleRate { 44100.0 };
-    std::atomic<double> fallbackBpm { 120.0 };   // project tempo when the host has none
+    std::atomic<double> fallbackBpm { 120.0 };
+    std::atomic<int> editorWidth { 0 };   // project tempo when the host has none
     int maxBlockSize = 512;
     double pendingHostBpm = 0.0;
     int hostBpmStableTicks = 0;
