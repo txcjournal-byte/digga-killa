@@ -26,11 +26,18 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
+
     void refreshSampleStatus();
+    void refreshResults();
+    void wireColumn (TrackColumn& column);
+    void togglePreview (int id);
+    void showRowMenu (int id);
+    void dragOut (int id);
 
     DiggaKillaProcessor& processor;
     juce::SharedResourcePointer<theme::Typefaces> typefaces;

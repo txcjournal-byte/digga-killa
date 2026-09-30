@@ -14,7 +14,8 @@ class RecordLabel : public juce::Component,
 public:
     RecordLabel();
 
-    void setStatus (SampleStore::Status status, const SampleStore::Info& info);
+    /** `detail` is shown under the file name while working ("CUTTING LOOPS"). */
+    void setStatus (SampleStore::Status status, const SampleStore::Info& info, const juce::String& detail = {});
     void setPlayback (bool isPlaying, float progress);
 
     std::function<void (const juce::File&)> onFileChosen;
@@ -40,6 +41,7 @@ private:
 
     SampleStore::Status status = SampleStore::Status::empty;
     SampleStore::Info info;
+    juce::String detail;
     bool dragOver = false;
     bool playing = false;
     float progress = 0.0f;

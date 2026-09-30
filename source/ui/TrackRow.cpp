@@ -114,6 +114,21 @@ void DragHandle::enablementChanged()
     repaint();
 }
 
+void DragHandle::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging && isEnabled() && e.getDistanceFromDragStart() > 4)
+    {
+        dragging = true;
+        if (onDragOut)
+            onDragOut();
+    }
+}
+
+void DragHandle::mouseUp (const juce::MouseEvent&)
+{
+    dragging = false;
+}
+
 void DragHandle::paint (juce::Graphics& g)
 {
     const auto centre = getLocalBounds().toFloat().getCentre();
@@ -131,6 +146,10 @@ TrackRow::TrackRow (Style s) : style (s)
 {
     for (auto* c : std::initializer_list<juce::Component*> { &play, &kill, &handle })
         addAndMakeVisible (c);
+
+    play.onClick = [this] { if (onPlay) onPlay(); };
+    kill.onClick = [this] { if (onKill) onKill(); };
+    handle.onDragOut = [this] { if (onDragOut) onDragOut(); };
 }
 
 void TrackRow::setModel (TrackRowModel newModel)
@@ -156,10 +175,37 @@ void TrackRow::setSelected (bool shouldBeSelected)
     }
 }
 
-void TrackRow::mouseDown (const juce::MouseEvent&)
+juce::Rectangle<float> TrackRow::getToggleArea() const
 {
-    if (! model.placeholder && onSelect)
+    return { (float) play.getRight() + 1.0f, 0.0f, 12.0f, (float) getHeight() };
+}
+
+void TrackRow::mouseDown (const juce::MouseEvent& e)
+{
+    if (model.placeholder)
+        return;
+
+    if (e.mods.isPopupMenu())
+    {
+        if (onSelect) onSelect();
+        if (onMenu) onMenu();
+        return;
+    }
+
+    if (model.hasChildren && getToggleArea().contains (e.position))
+    {
+        if (onToggle) onToggle();
+        return;
+    }
+
+    if (onSelect)
         onSelect();
+}
+
+void TrackRow::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (! model.placeholder && model.hasChildren && onToggle)
+        onToggle();
 }
 
 // Offsets below are measured from docs/design.png (row-relative pixels).
@@ -181,11 +227,12 @@ void TrackRow::resized()
     }
     else
     {
-        play.setBounds (6, centredY (32), 32, 32);
+        const int shotIndent = model.depth * shotIndentPerLevel;
+        play.setBounds (6 + shotIndent, centredY (32), 32, 32);
         kill.setBounds (getWidth() - 50, centredY (36), 48, 36);
         handle.setBounds (kill.getX() - 38, 0, 20, h);
-        durationArea = { (float) handle.getX() - 64.0f, 0.0f, 50.0f, (float) h };
-        waveArea = { 55.0f, (float) h * 0.14f, 58.0f, (float) h * 0.72f };
+        durationArea = { (float) handle.getX() - (model.depth > 0 ? 52.0f : 64.0f), 0.0f, 44.0f, (float) h };
+        waveArea = { (float) play.getRight() + 12.0f, (float) h * 0.14f, model.depth > 0 ? 36.0f : 58.0f, (float) h * 0.72f };
         nameArea = juce::Rectangle<float>::leftTopRightBottom (waveArea.getRight() + 12.0f, 0.0f,
                                                               durationArea.getX(), (float) h);
     }
@@ -209,7 +256,8 @@ void TrackRow::paint (juce::Graphics& g)
     // tree connectors for KILL variations
     if (model.depth > 0)
     {
-        const float x = 25.0f + (float) (model.depth - 1) * indentPerLevel;
+        const float x = style == Style::loop ? 25.0f + (float) (model.depth - 1) * indentPerLevel
+                                             : 22.0f + (float) (model.depth - 1) * shotIndentPerLevel;
         const float midY = bounds.getCentreY();
         g.setColour (ink.withAlpha (0.85f * alpha));
         g.fillRect (x, 0.0f, 1.3f, (model.lastSibling ? midY : bounds.getBottom()));
@@ -227,7 +275,28 @@ void TrackRow::paint (juce::Graphics& g)
     g.drawFittedText (model.name, nameArea.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
 
     g.setFont (condensed (17.0f).withExtraKerningFactor (0.02f));
-    g.drawText (model.duration, durationArea, juce::Justification::centred, false);
+    if (model.busy)
+    {
+        g.setColour (red);
+        g.drawFittedText ("KILLING", durationArea.toNearestInt().expanded (6, 0), juce::Justification::centred, 1, 0.7f);
+    }
+    else
+    {
+        g.drawText (model.duration, durationArea, juce::Justification::centred, false);
+    }
+
+    // fold marker for rows with KILL variations
+    if (model.hasChildren)
+    {
+        const auto area = getToggleArea().withSizeKeepingCentre (8.0f, 8.0f).translated (1.0f, 0.0f);
+        juce::Path marker;
+        if (model.expanded)
+            marker.addTriangle (area.getX(), area.getY() + 1.5f, area.getRight(), area.getY() + 1.5f, area.getCentreX(), area.getBottom() - 0.5f);
+        else
+            marker.addTriangle (area.getX() + 1.5f, area.getY(), area.getX() + 1.5f, area.getBottom(), area.getRight() - 0.5f, area.getCentreY());
+        g.setColour (textColour.withMultipliedAlpha (0.8f));
+        g.fillPath (marker);
+    }
 
     drawWaveform (g, waveArea);
 }

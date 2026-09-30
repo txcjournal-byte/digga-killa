@@ -49,10 +49,11 @@ bool RecordLabel::hitTest (int x, int y)
     return getDisc().getCentre().getDistanceFrom ({ (float) x, (float) y }) <= discRadius;
 }
 
-void RecordLabel::setStatus (SampleStore::Status newStatus, const SampleStore::Info& newInfo)
+void RecordLabel::setStatus (SampleStore::Status newStatus, const SampleStore::Info& newInfo, const juce::String& newDetail)
 {
     status = newStatus;
     info = newInfo;
+    detail = newDetail;
     playButton.setVisible (status == SampleStore::Status::ready);
     repaint();
 }
@@ -125,6 +126,8 @@ void RecordLabel::paint (juce::Graphics& g)
         case SampleStore::Status::loading:
             stampText ("DIGGING...", titleArea, ink);
             smallText (info.file.getFileName(), infoY, inkSoft);
+            if (detail.isNotEmpty())
+                smallText (detail, infoY + 26.0f, red);
             break;
 
         case SampleStore::Status::error:

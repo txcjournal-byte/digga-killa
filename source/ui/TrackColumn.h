@@ -20,10 +20,11 @@ public:
     int getNumRows() const noexcept { return (int) rows.size(); }
     TrackRow* getRow (int index) const { return juce::isPositiveAndBelow (index, rows.size()) ? rows[(size_t) index].get() : nullptr; }
 
-    void setSelectedRow (int index);
-    int getSelectedRow() const noexcept { return selectedRow; }
+    /** Highlights the row showing this node (or none). */
+    void setSelectedId (int id);
+    void setPlayingId (int id);
 
-    std::function<void (int)> onRowSelected;
+    std::function<void (int id)> onSelect, onPlay, onKill, onToggle, onMenu, onDragOut;
 
     void resized() override;
 
@@ -32,7 +33,7 @@ private:
 
     TrackRow::Style style;
     int rootHeight, childHeight;
-    int selectedRow = -1;
+    int selectedId = -1, playingId = -1;
 
     juce::Viewport viewport;
     juce::Component content;

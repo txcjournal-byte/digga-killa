@@ -3,27 +3,6 @@
 namespace digga
 {
 
-SamplePlayer::~SamplePlayer()
-{
-    collectGarbage();
-    delete pending.exchange (nullptr);
-    delete active;
-}
-
-void SamplePlayer::setSample (std::unique_ptr<PlaybackSample> sample)
-{
-    // If the audio thread has not picked up the previous one yet, it never
-    // will, so it is safe to delete here.
-    delete pending.exchange (sample.release());
-}
-
-void SamplePlayer::collectGarbage()
-{
-    PlaybackSample* item = nullptr;
-    while (trash.pop (item))
-        delete item;
-}
-
 void SamplePlayer::prepare (double sampleRate) noexcept
 {
     currentRate = sampleRate;
@@ -34,7 +13,8 @@ void SamplePlayer::prepare (double sampleRate) noexcept
 
 void SamplePlayer::trigger() noexcept
 {
-    if (active == nullptr || active->audio.getNumSamples() == 0)
+    const auto* active = handoff.get();
+    if (active == nullptr || active->audio->getNumSamples() == 0)
         return;
 
     position = 0;
@@ -51,18 +31,10 @@ void SamplePlayer::stop() noexcept
 
 void SamplePlayer::beginBlock() noexcept
 {
-    // Only swap when the old sample can be retired without freeing it here.
-    if (pending.load() != nullptr && trash.getFreeSpace() > 0)
+    if (handoff.acquire())
     {
-        if (auto* incoming = pending.exchange (nullptr))
-        {
-            if (active != nullptr)
-                trash.push (active);
-
-            active = incoming;
-            playing = false;
-            position = 0;
-        }
+        playing = false;
+        position = 0;
     }
 
     if (stopRequested.exchange (false))
@@ -74,6 +46,8 @@ void SamplePlayer::beginBlock() noexcept
 
 void SamplePlayer::render (juce::AudioBuffer<float>& output, int startSample, int numSamples) noexcept
 {
+    const auto* active = handoff.get();
+
     // A sample prepared for a different rate is being rebuilt in the
     // background; stay silent rather than play it at the wrong pitch.
     if (playing && active != nullptr && ! juce::approximatelyEqual (active->sampleRate, currentRate))
@@ -81,9 +55,9 @@ void SamplePlayer::render (juce::AudioBuffer<float>& output, int startSample, in
 
     if (playing && active != nullptr)
     {
-        const auto total = (juce::int64) active->audio.getNumSamples();
-        const float* srcL = active->audio.getReadPointer (0);
-        const float* srcR = active->audio.getReadPointer (1);
+        const auto total = (juce::int64) active->audio->getNumSamples();
+        const float* srcL = active->audio->getReadPointer (0);
+        const float* srcR = active->audio->getReadPointer (juce::jmin (1, active->audio->getNumChannels() - 1));
         const int numOut = output.getNumChannels();
         float* outL = numOut > 0 ? output.getWritePointer (0) : nullptr;
         float* outR = numOut > 1 ? output.getWritePointer (1) : nullptr;
@@ -122,7 +96,7 @@ void SamplePlayer::render (juce::AudioBuffer<float>& output, int startSample, in
 
     playingFlag.store (playing);
 
-    const auto total = active != nullptr ? active->audio.getNumSamples() : 0;
+    const auto total = active != nullptr ? active->audio->getNumSamples() : 0;
     progress.store (playing && total > 0 ? (float) position / (float) total : 0.0f);
 }
 

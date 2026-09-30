@@ -1,7 +1,10 @@
 #pragma once
 
+#include "core/Engine.h"
 #include "core/JobQueue.h"
 #include "core/SampleStore.h"
+#include "dsp/FxChain.h"
+#include "playback/ClipPlayer.h"
 #include "playback/SamplePlayer.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -57,19 +60,43 @@ public:
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
     SampleStore& getSampleStore() noexcept { return sampleStore; }
     SamplePlayer& getPlayer() noexcept { return player; }
+    ClipPlayer& getClipPlayer() noexcept { return clipPlayer; }
+    Engine& getEngine() noexcept { return engine; }
 
     /** Tempo reported by the host, or 0 if the host doesn't provide one. */
     double getHostBpm() const noexcept { return hostBpm.load(); }
+    double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
+
+    /** Current FX knob values (for offline export). */
+    dsp::FxParams getFxParams() const noexcept;
+    bool isReverseOn() const noexcept { return reverseParam->load() > 0.5f; }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void timerCallback() override;
 
     juce::AudioProcessorValueTreeState parameters;
+    std::atomic<float>* reverbParam = nullptr;
+    std::atomic<float>* delayParam = nullptr;
+    std::atomic<float>* distortionParam = nullptr;
+    std::atomic<float>* filterParam = nullptr;
+    std::atomic<float>* pitchParam = nullptr;
+    std::atomic<float>* mixParam = nullptr;
+    std::atomic<float>* reverseParam = nullptr;
+
     SamplePlayer player;
+    ClipPlayer clipPlayer;
+    dsp::FxChain fx;
     JobQueue jobs;
+    Engine engine;
     SampleStore sampleStore;
+
     std::atomic<double> hostBpm { 0.0 };
+    std::atomic<double> currentSampleRate { 44100.0 };
+    std::atomic<double> fallbackBpm { 120.0 };   // project tempo when the host has none
+    int maxBlockSize = 512;
+    double pendingHostBpm = 0.0;
+    int hostBpmStableTicks = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DiggaKillaProcessor)
 };

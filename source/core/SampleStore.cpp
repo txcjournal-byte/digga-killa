@@ -5,7 +5,7 @@ namespace digga
 
 namespace
 {
-    constexpr double maxLengthSeconds = 15.0 * 60.0;
+    constexpr double maxLengthSeconds = 10.0 * 60.0;
 
     std::unique_ptr<PlaybackSample> makePlayback (const juce::AudioBuffer<float>& source,
                                                   double sourceRate, double targetRate)
@@ -13,24 +13,23 @@ namespace
         auto result = std::make_unique<PlaybackSample>();
         result->sampleRate = targetRate;
 
-        if (juce::approximatelyEqual (sourceRate, targetRate))
-        {
-            result->audio.makeCopyOf (source);
-            return result;
-        }
-
         const double ratio = sourceRate / targetRate;
         const int numIn = source.getNumSamples();
         const int numOut = (int) std::ceil ((double) numIn / ratio);
-        result->audio.setSize (2, numOut);
+        auto audio = std::make_shared<juce::AudioBuffer<float>> (2, numOut);
 
         for (int ch = 0; ch < 2; ++ch)
         {
+            if (juce::approximatelyEqual (sourceRate, targetRate))
+            {
+                audio->copyFrom (ch, 0, source, ch, 0, numIn);
+                continue;
+            }
             juce::Interpolators::WindowedSinc interpolator;
-            interpolator.process (ratio, source.getReadPointer (ch), result->audio.getWritePointer (ch),
-                                  numOut, numIn, 0);
+            interpolator.process (ratio, source.getReadPointer (ch), audio->getWritePointer (ch), numOut, numIn, 0);
         }
 
+        result->audio = std::move (audio);
         return result;
     }
 }
@@ -125,7 +124,7 @@ void SampleStore::runLoad (const juce::File& file, juce::uint32 generation)
         return fail (generation, "File is empty");
 
     if ((double) length / reader->sampleRate > maxLengthSeconds)
-        return fail (generation, "File is longer than 15 minutes");
+        return fail (generation, "File is longer than 10 minutes");
 
     auto buffer = std::make_shared<juce::AudioBuffer<float>> (2, (int) length);
     buffer->clear();

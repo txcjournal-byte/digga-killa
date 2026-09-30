@@ -44,15 +44,26 @@ public:
     DragHandle();
     void paint (juce::Graphics&) override;
     void enablementChanged() override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    std::function<void()> onDragOut;
+
+private:
+    bool dragging = false;
 };
 
 struct TrackRowModel
 {
+    int id = -1;                     // ResultNode id
     juce::String name;               // "A2 – Loop 16 bars"
     juce::String duration;           // "0:32"
     int depth = 0;                   // 0 = root, 1+ = KILL variation level
     bool lastSibling = false;        // tree connector ends here
     bool placeholder = true;         // nothing generated yet
+    bool hasChildren = false;        // has KILL variations
+    bool expanded = true;
+    bool busy = false;               // KILL running on this row
     std::vector<float> peaks;        // 0..1 waveform overview
 };
 
@@ -70,7 +81,9 @@ public:
     void setSelected (bool shouldBeSelected);
     bool isSelected() const noexcept { return selected; }
 
-    std::function<void()> onSelect;
+    std::function<void()> onSelect, onPlay, onKill, onToggle, onMenu, onDragOut;
+
+    void setPlaying (bool isPlaying) { play.setPlaying (isPlaying); }
 
     PlayButton play;
     KillStamp kill;
@@ -79,8 +92,10 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
+    juce::Rectangle<float> getToggleArea() const;
     void drawWaveform (juce::Graphics&, juce::Rectangle<float> area) const;
 
     Style style;
@@ -89,6 +104,7 @@ private:
     juce::Rectangle<float> nameArea, waveArea, durationArea;
 
     static constexpr int indentPerLevel = 51;
+    static constexpr int shotIndentPerLevel = 24;
 };
 
 } // namespace digga

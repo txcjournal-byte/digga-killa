@@ -56,9 +56,21 @@ juce_add_binary_data(DiggaKillaAssets
 target_sources(DiggaKilla PRIVATE
     source/PluginProcessor.cpp
     source/PluginEditor.cpp
+    source/core/AudioTools.cpp
+    source/core/Engine.cpp
     source/core/JobQueue.cpp
+    source/core/ResultTree.cpp
     source/core/SampleStore.cpp
+    source/analysis/Features.cpp
+    source/analysis/Analyzer.cpp
+    source/loops/LoopGenerator.cpp
+    source/oneshots/OneShotExtractor.cpp
+    source/kill/KillEngine.cpp
+    source/dsp/Stretcher.cpp
+    source/dsp/FxChain.cpp
+    source/export/Exporter.cpp
     source/playback/SamplePlayer.cpp
+    source/playback/ClipPlayer.cpp
     source/ui/Theme.cpp
     source/ui/DiggaLookAndFeel.cpp
     source/ui/TempoDisplay.cpp
@@ -68,7 +80,11 @@ target_sources(DiggaKilla PRIVATE
     source/ui/FxPanel.cpp
     source/ui/MainView.cpp)
 
+# signalsmith-stretch 1.4.0 + signalsmith-linear 0.6.4 (MIT), vendored header-only
 target_include_directories(DiggaKilla PRIVATE source)
+target_include_directories(DiggaKilla SYSTEM PRIVATE
+    third_party/signalsmith-stretch/include
+    third_party/signalsmith-linear/include)
 
 target_compile_definitions(DiggaKilla PUBLIC
     JUCE_WEB_BROWSER=0

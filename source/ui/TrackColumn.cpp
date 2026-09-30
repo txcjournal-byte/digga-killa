@@ -21,25 +21,42 @@ void TrackColumn::setRows (const std::vector<TrackRowModel>& models)
         if (rows[i] == nullptr)
         {
             rows[i] = std::make_unique<TrackRow> (style);
-            const int index = (int) i;
-            rows[i]->onSelect = [this, index] { setSelectedRow (index); if (onRowSelected) onRowSelected (index); };
-            content.addAndMakeVisible (*rows[i]);
+            auto* row = rows[i].get();
+            auto forward = [row] (std::function<void (int)>& target)
+            {
+                return [row, &target] { if (target) target (row->getModel().id); };
+            };
+            row->onSelect = forward (onSelect);
+            row->onPlay = forward (onPlay);
+            row->onKill = forward (onKill);
+            row->onToggle = forward (onToggle);
+            row->onMenu = forward (onMenu);
+            row->onDragOut = forward (onDragOut);
+            content.addAndMakeVisible (*row);
         }
 
         rows[i]->setModel (models[i]);
+        rows[i]->setSelected (models[i].id >= 0 && models[i].id == selectedId);
+        rows[i]->setPlaying (models[i].id >= 0 && models[i].id == playingId);
     }
-
-    if (selectedRow >= (int) rows.size())
-        selectedRow = -1;
 
     layoutRows();
 }
 
-void TrackColumn::setSelectedRow (int index)
+void TrackColumn::setSelectedId (int id)
 {
-    selectedRow = index;
-    for (size_t i = 0; i < rows.size(); ++i)
-        rows[i]->setSelected ((int) i == index);
+    selectedId = id;
+    for (auto& row : rows)
+        row->setSelected (id >= 0 && row->getModel().id == id);
+}
+
+void TrackColumn::setPlayingId (int id)
+{
+    if (playingId == id)
+        return;
+    playingId = id;
+    for (auto& row : rows)
+        row->setPlaying (id >= 0 && row->getModel().id == id);
 }
 
 void TrackColumn::resized()
