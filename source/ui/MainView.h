@@ -1,9 +1,8 @@
 #pragma once
 
 #include "ui/FxPanel.h"
-#include "ui/Header.h"
-#include "ui/PaperBackground.h"
 #include "ui/RecordLabel.h"
+#include "ui/TempoDisplay.h"
 #include "ui/TrackColumn.h"
 
 namespace digga
@@ -11,8 +10,9 @@ namespace digga
 
 class DiggaKillaProcessor;
 
-/** The whole UI laid out at a fixed logical size (that of design.png); the
-    editor scales it with a transform, so everything stays vector-sharp. */
+/** The whole UI at the pixel size of docs/design.png. The static artwork is
+    the skin cut from that file; live controls sit on the exact spots they
+    occupy in it. The editor scales this view uniformly. */
 class MainView : public juce::Component,
                  private juce::ChangeListener,
                  private juce::Timer
@@ -34,9 +34,9 @@ private:
 
     DiggaKillaProcessor& processor;
     juce::SharedResourcePointer<theme::Typefaces> typefaces;
-    PaperBackground paper;
+    juce::Image background;
 
-    Header header;
+    TempoDisplay tempo;
     TrackColumn loops, shots;
     RecordLabel record;
     FxPanel fx;

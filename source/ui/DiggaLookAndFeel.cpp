@@ -40,6 +40,20 @@ void DiggaLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wi
         return centre.getPointOnCircumference (r, angle);
     };
 
+    if (slider.getProperties()["skinned"])
+    {
+        // body and scale are printed in the skin: only the red pointer is live
+        const float bodyRadius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.45f + 1.0f;
+        const float angle = startAngle + sliderPos * (endAngle - startAngle);
+        juce::Path pointer;
+        pointer.startNewSubPath (pointAt (angle, bodyRadius * 0.47f));
+        pointer.lineTo (pointAt (angle, bodyRadius * 0.97f));
+        g.setColour (juce::Colour (0xffc62a2f).withAlpha (alpha));
+        g.strokePath (pointer, juce::PathStrokeType (3.2f, juce::PathStrokeType::curved,
+                                                     juce::PathStrokeType::butt));
+        return;
+    }
+
     // scale ticks
     constexpr int numTicks = 11;
     for (int i = 0; i < numTicks; ++i)
@@ -106,7 +120,7 @@ void DiggaLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int wi
     g.setColour (red.withAlpha (alpha));
     g.fillRoundedRectangle (track.withRight (sliderPos), trackHeight * 0.5f);
 
-    const float thumbRadius = juce::jmin (bounds.getHeight() * 0.5f, 14.0f);
+    const float thumbRadius = juce::jmin (bounds.getHeight() * 0.5f, 15.0f);
     const auto thumb = juce::Rectangle<float> (thumbRadius * 2.0f, thumbRadius * 2.0f)
                            .withCentre ({ sliderPos, bounds.getCentreY() });
 
@@ -122,14 +136,15 @@ void DiggaLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& 
 {
     using namespace theme;
     const auto bounds = button.getLocalBounds().toFloat();
-    const auto pill = bounds.withSizeKeepingCentre (juce::jmin (bounds.getWidth(), bounds.getHeight() * 1.9f),
-                                                    bounds.getHeight()).reduced (1.5f);
+    const auto pill = bounds.reduced (1.0f);
     const bool on = button.getToggleState();
     const float alpha = button.isEnabled() ? 1.0f : 0.45f;
     const float radius = pill.getHeight() * 0.5f;
 
-    g.setColour ((on ? red : ink).withAlpha (alpha));
+    g.setColour ((on ? red : juce::Colour (0xff232220)).withAlpha (alpha));
     g.fillRoundedRectangle (pill, radius);
+    g.setColour (juce::Colours::black.withAlpha (0.5f * alpha));
+    g.drawRoundedRectangle (pill, radius, 1.0f);
 
     const auto knob = juce::Rectangle<float> (pill.getHeight(), pill.getHeight())
                           .withX (on ? pill.getRight() - pill.getHeight() : pill.getX())

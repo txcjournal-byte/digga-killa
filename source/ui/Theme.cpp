@@ -6,8 +6,12 @@ namespace digga::theme
 {
 
 Typefaces::Typefaces()
-    : display  (juce::Typeface::createSystemTypefaceFor (BinaryData::AntonRegular_ttf,
-                                                         BinaryData::AntonRegular_ttfSize)),
+    : display  (juce::Typeface::createSystemTypefaceFor (BinaryData::ArchivoBlackRegular_ttf,
+                                                         BinaryData::ArchivoBlackRegular_ttfSize)),
+      condensed (juce::Typeface::createSystemTypefaceFor (BinaryData::BarlowCondensedSemiBold_ttf,
+                                                          BinaryData::BarlowCondensedSemiBold_ttfSize)),
+      condensedBold (juce::Typeface::createSystemTypefaceFor (BinaryData::BarlowCondensedBold_ttf,
+                                                              BinaryData::BarlowCondensedBold_ttfSize)),
       mono     (juce::Typeface::createSystemTypefaceFor (BinaryData::CourierPrimeRegular_ttf,
                                                          BinaryData::CourierPrimeRegular_ttfSize)),
       monoBold (juce::Typeface::createSystemTypefaceFor (BinaryData::CourierPrimeBold_ttf,
@@ -15,10 +19,17 @@ Typefaces::Typefaces()
 {
 }
 
-juce::Font display (float height)
+juce::Font display (float height, float horizontalScale)
 {
     const juce::SharedResourcePointer<Typefaces> faces;
-    return juce::Font (juce::FontOptions (faces->display).withHeight (height));
+    return juce::Font (juce::FontOptions (faces->display).withHeight (height)
+                                                         .withHorizontalScale (horizontalScale));
+}
+
+juce::Font condensed (float height, bool bold)
+{
+    const juce::SharedResourcePointer<Typefaces> faces;
+    return juce::Font (juce::FontOptions (bold ? faces->condensedBold : faces->condensed).withHeight (height));
 }
 
 juce::Font mono (float height, bool bold)
@@ -77,29 +88,19 @@ void addGrunge (juce::Graphics& g, const juce::Path& clip, juce::Colour speckCol
     }
 }
 
-void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::Justification justification)
+juce::Image skinBackground()
 {
-    const auto font = display (100.0f);
+    return juce::ImageCache::getFromMemory (BinaryData::background_png, BinaryData::background_pngSize);
+}
 
-    juce::GlyphArrangement trap, vst;
-    trap.addLineOfText (font, "Trap", 0.0f, 0.0f);
-    const float trapWidth = trap.getBoundingBox (0, -1, true).getRight() + 1.0f;
-    vst.addLineOfText (font, "VST", trapWidth, 0.0f);
+juce::Image skinDropSample()
+{
+    return juce::ImageCache::getFromMemory (BinaryData::drop_sample_png, BinaryData::drop_sample_pngSize);
+}
 
-    juce::Path trapPath, vstPath;
-    trap.createPath (trapPath);
-    vst.createPath (vstPath);
-
-    juce::Path all (trapPath);
-    all.addPath (vstPath);
-    const auto transform = all.getTransformToScaleToFit (area, true, justification);
-    trapPath.applyTransform (transform);
-    vstPath.applyTransform (transform);
-
-    g.setColour (ink);
-    g.fillPath (trapPath);
-    g.setColour (red);
-    g.fillPath (vstPath);
+juce::Image skinKillStamp()
+{
+    return juce::ImageCache::getFromMemory (BinaryData::kill_stamp_png, BinaryData::kill_stamp_pngSize);
 }
 
 } // namespace digga::theme

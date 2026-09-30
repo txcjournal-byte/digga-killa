@@ -55,6 +55,17 @@ Volby:
 pluginval --strictness-level 10 --validate "build/DiggaKilla_artefacts/Release/VST3/Digga Killa.vst3"
 ```
 
+## Grafika (skin)
+
+UI je přesně podle `docs/design.png`. Statická grafika (papír, nápis, logo, hlavičky, deska, knoby, popisky, čáry) se bere 1:1 z obrázku, živé prvky (řádky, waveformy, tempo, ukazatele knobů, přepínač, slider, stav desky) se kreslí na přesné pozice z designu.
+
+```sh
+pip install pillow numpy
+python3 tools/make_skin.py      # docs/design.png → assets/skin/*.png
+```
+
+Po úpravě designu stačí nahradit `docs/design.png` a skript spustit znovu. Pro ostrý obraz při zvětšení se hodí design ve 2× rozlišení (2688 × 1792). Souřadnice pak stačí vynásobit v `tools/make_skin.py` i v kódu UI.
+
 ## Struktura
 
 ```
@@ -63,11 +74,13 @@ source/
   PluginEditor.*      okno pluginu, škálování (pevný poměr stran)
   core/               JobQueue (vlákno na pozadí), SampleStore (načtení + převzorkování)
   playback/           SamplePlayer (předávání bufferů bez zámků a alokací)
-  ui/                 Theme (barvy, fonty, grunge), LookAndFeel, Header, RecordLabel,
-                      TrackRow / TrackColumn, FxPanel, PaperBackground, MainView
+  ui/                 Theme (barvy, fonty, skin), LookAndFeel, TempoDisplay, RecordLabel,
+                      TrackRow / TrackColumn, FxPanel, MainView
   analysis/ loops/ oneshots/ kill/ dsp/ export/   (další fáze)
-tools/Snapshot.cpp    headless snímek UI
-assets/fonts/         Anton, Courier Prime (SIL OFL)
+tools/Snapshot.cpp    headless snímek UI (i s ukázkovými řádky jako v designu)
+tools/make_skin.py    generátor skinu z docs/design.png
+assets/skin/          pozadí a sprity vyříznuté z designu
+assets/fonts/         Archivo Black, Barlow Condensed, Courier Prime (SIL OFL)
 ```
 
 Pravidla pro vlákna:
@@ -82,7 +95,7 @@ Pravidla pro vlákna:
 | JUCE 8 | AGPLv3 **nebo** komerční licence JUCE. Pro komerční prodej je potřeba licence JUCE (Starter zdarma do obratu 50 000 USD ročně). |
 | VST3 SDK (součást JUCE) | MIT (SDK 3.8+) |
 | libFLAC (součást JUCE) | BSD |
-| Anton, Courier Prime | SIL Open Font License 1.1 (`assets/fonts/*-OFL.txt`) |
+| Archivo Black, Barlow Condensed, Courier Prime | SIL Open Font License 1.1 (`assets/fonts/*-OFL.txt`) |
 | pluginval (jen testovací nástroj, nelinkuje se) | GPLv3 |
 
 Knihovny GPL/AGPL se do pluginu nelinkují (kromě JUCE, pro které je potřeba komerční licence, viz výše).

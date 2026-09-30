@@ -8,11 +8,13 @@
 namespace digga
 {
 
-/** Titled, scrollable tracklist ("LOOPS" / "ONE-SHOTS"). */
+/** Scrollable tracklist ("LOOPS" / "ONE-SHOTS" headings are printed in the
+    skin). Root rows and KILL variations can have different heights, as in
+    the design. */
 class TrackColumn : public juce::Component
 {
 public:
-    TrackColumn (juce::String title, TrackRow::Style style, int rowHeight);
+    TrackColumn (TrackRow::Style style, int rootRowHeight, int childRowHeight);
 
     void setRows (const std::vector<TrackRowModel>& models);
     int getNumRows() const noexcept { return (int) rows.size(); }
@@ -23,17 +25,13 @@ public:
 
     std::function<void (int)> onRowSelected;
 
-    void paint (juce::Graphics&) override;
     void resized() override;
-
-    static constexpr int headingHeight = 52;
 
 private:
     void layoutRows();
 
-    juce::String title;
     TrackRow::Style style;
-    int rowHeight;
+    int rootHeight, childHeight;
     int selectedRow = -1;
 
     juce::Viewport viewport;

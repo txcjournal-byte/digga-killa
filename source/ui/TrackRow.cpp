@@ -18,6 +18,15 @@ void PlayButton::setPlaying (bool shouldShowStop)
     }
 }
 
+void PlayButton::setRowSelected (bool isSelected)
+{
+    if (rowSelected != isSelected)
+    {
+        rowSelected = isSelected;
+        repaint();
+    }
+}
+
 void PlayButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     using namespace theme;
@@ -25,7 +34,9 @@ void PlayButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     const auto side = juce::jmin (bounds.getWidth(), bounds.getHeight());
     bounds = bounds.withSizeKeepingCentre (side, side);
 
-    auto colour = isEnabled() ? (playing ? red : ink) : muted.withAlpha (0.45f);
+    auto colour = ! isEnabled() ? muted.withAlpha (0.45f)
+                  : (playing || rowSelected) ? juce::Colour (0xff9e1b21)
+                                              : juce::Colour (0xff1d1c1a);
     if (isEnabled() && highlighted)
         colour = colour.brighter (0.25f);
     if (down)
@@ -35,7 +46,7 @@ void PlayButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     g.fillRoundedRectangle (bounds, 3.0f);
 
     g.setColour (paperLight);
-    const auto icon = bounds.reduced (side * 0.32f);
+    const auto icon = bounds.reduced (side * 0.3f);
 
     if (playing)
     {
@@ -70,38 +81,24 @@ void KillStamp::setRowSelected (bool selected)
 void KillStamp::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     using namespace theme;
-    const auto bounds = getLocalBounds().toFloat();
-    const auto stamp = bounds.reduced (3.0f, 2.0f);
     const bool hot = isEnabled() && (highlighted || down || rowSelected);
-
-    const auto colour = ! isEnabled() ? muted.withAlpha (0.35f)
-                        : hot         ? red
-                                      : muted.withAlpha (0.8f);
-
-    const juce::Graphics::ScopedSaveState state (g);
-    g.addTransform (juce::AffineTransform::rotation (juce::degreesToRadians (-2.5f),
-                                                     bounds.getCentreX(), bounds.getCentreY()));
+    auto area = getLocalBounds().toFloat();
     if (down)
-        g.addTransform (juce::AffineTransform::scale (0.96f, 0.96f, bounds.getCentreX(), bounds.getCentreY()));
+        area = area.reduced (1.0f);
 
-    juce::Path ink;
-    ink.addRectangle (stamp);
-    juce::Path inner;
-    inner.addRectangle (stamp.reduced (2.2f));
-    ink.setUsingNonZeroWinding (false);
-    ink.addPath (inner);                        // outer frame ring
-    ink.addRectangle (stamp.reduced (3.6f));
-    juce::Path hole;
-    hole.addRectangle (stamp.reduced (4.6f));
-    ink.addPath (hole);                         // thin inner frame ring
-    const auto text = textPath ("KILL", display (40.0f), stamp.reduced (7.5f, 6.0f), true);
+    const auto stamp = skinKillStamp();
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
 
-    g.setColour (colour);
-    g.fillPath (ink);
-    g.fillPath (text);
-    g.strokePath (text, juce::PathStrokeType (0.8f));
-    ink.addPath (text);
-    addGrunge (g, ink, paper, 404 + getX(), 0.9f);
+    if (hot)
+    {
+        g.drawImage (stamp, area, juce::RectanglePlacement::centred);
+    }
+    else
+    {
+        // same print, muted ink
+        g.setColour (isEnabled() ? juce::Colour (0xff7d776c) : muted.withAlpha (0.4f));
+        g.drawImage (stamp, area, juce::RectanglePlacement::centred, true);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +117,7 @@ void DragHandle::enablementChanged()
 void DragHandle::paint (juce::Graphics& g)
 {
     const auto centre = getLocalBounds().toFloat().getCentre();
-    const float gap = 5.0f, dot = 3.2f;
+    const float gap = 6.5f, dot = 4.0f;
     g.setColour (isEnabled() ? theme::ink : theme::muted.withAlpha (0.5f));
 
     for (int col = 0; col < 2; ++col)
@@ -141,6 +138,7 @@ void TrackRow::setModel (TrackRowModel newModel)
     model = std::move (newModel);
     const bool live = ! model.placeholder;
     play.setEnabled (live);
+    play.setRowSelected (selected);
     kill.setEnabled (live);
     handle.setEnabled (live);
     resized();
@@ -153,6 +151,7 @@ void TrackRow::setSelected (bool shouldBeSelected)
     {
         selected = shouldBeSelected;
         kill.setRowSelected (selected);
+        play.setRowSelected (selected);
         repaint();
     }
 }
@@ -163,34 +162,32 @@ void TrackRow::mouseDown (const juce::MouseEvent&)
         onSelect();
 }
 
+// Offsets below are measured from docs/design.png (row-relative pixels).
 void TrackRow::resized()
 {
-    auto area = getLocalBounds();
-    const int h = area.getHeight();
-    const int buttonSize = 30;
-
-    area.removeFromLeft (4 + model.depth * indentPerLevel);
-    play.setBounds (area.removeFromLeft (buttonSize).withSizeKeepingCentre (buttonSize, buttonSize));
-    area.removeFromLeft (10);
-
-    kill.setBounds (area.removeFromRight (58).withSizeKeepingCentre (58, juce::jmin (h - 6, 32)));
-    area.removeFromRight (6);
-    handle.setBounds (area.removeFromRight (22));
-    area.removeFromRight (4);
-    durationArea = area.removeFromRight (48).toFloat();
-    area.removeFromRight (6);
+    const int h = getHeight();
+    const int indent = model.depth * indentPerLevel;
+    auto centredY = [h] (int size) { return (h - size) / 2; };
 
     if (style == Style::loop)
     {
-        nameArea = area.removeFromLeft (model.depth > 0 ? 116 : 120).toFloat();
-        area.removeFromLeft (4);
-        waveArea = area.toFloat().reduced (0.0f, (float) h * 0.14f);
+        play.setBounds (4 + indent, centredY (32), 32, 32);
+        kill.setBounds (getWidth() - 50, centredY (36), 48, 36);
+        handle.setBounds (kill.getX() - 38, 0, 20, h);
+        durationArea = { (float) handle.getX() - 64.0f, 0.0f, 50.0f, (float) h };
+        nameArea = { (float) play.getRight() + 13.0f, 0.0f, model.depth > 0 ? 106.0f : 120.0f, (float) h };
+        waveArea = juce::Rectangle<float>::leftTopRightBottom (nameArea.getRight() + 4.0f, (float) h * 0.12f,
+                                                              durationArea.getX() - 4.0f, (float) h * 0.88f);
     }
     else
     {
-        waveArea = area.removeFromLeft (juce::jmin (64, area.getWidth() / 2)).toFloat().reduced (0.0f, (float) h * 0.2f);
-        area.removeFromLeft (14);
-        nameArea = area.toFloat();
+        play.setBounds (6, centredY (32), 32, 32);
+        kill.setBounds (getWidth() - 50, centredY (36), 48, 36);
+        handle.setBounds (kill.getX() - 38, 0, 20, h);
+        durationArea = { (float) handle.getX() - 64.0f, 0.0f, 50.0f, (float) h };
+        waveArea = { 55.0f, (float) h * 0.14f, 58.0f, (float) h * 0.72f };
+        nameArea = juce::Rectangle<float>::leftTopRightBottom (waveArea.getRight() + 12.0f, 0.0f,
+                                                              durationArea.getX(), (float) h);
     }
 }
 
@@ -198,39 +195,40 @@ void TrackRow::paint (juce::Graphics& g)
 {
     using namespace theme;
     const auto bounds = getLocalBounds().toFloat();
-    const float alpha = model.placeholder ? 0.42f : 1.0f;
+    const float alpha = model.placeholder ? 0.4f : 1.0f;
 
     if (selected)
     {
-        g.setColour (red.withAlpha (0.2f));
-        g.fillRect (bounds.reduced (0.0f, 1.0f));
-        g.setColour (red.withAlpha (0.55f));
-        g.drawRect (bounds.reduced (0.0f, 1.0f), 1.0f);
+        const auto band = bounds.reduced (0.0f, 1.0f);
+        g.setColour (red.withAlpha (0.18f));
+        g.fillRect (band);
+        g.setColour (red.withAlpha (0.45f));
+        g.drawRect (band, 1.0f);
     }
 
     // tree connectors for KILL variations
     if (model.depth > 0)
     {
-        const float x = 4.0f + (float) (model.depth - 1) * indentPerLevel + 22.0f;
+        const float x = 25.0f + (float) (model.depth - 1) * indentPerLevel;
         const float midY = bounds.getCentreY();
-        g.setColour (ink.withAlpha (0.8f * alpha));
-        g.drawLine (x, 0.0f, x, model.lastSibling ? midY : bounds.getBottom(), 1.3f);
-        g.drawLine (x, midY, (float) play.getX() - 4.0f, midY, 1.3f);
+        g.setColour (ink.withAlpha (0.85f * alpha));
+        g.fillRect (x, 0.0f, 1.3f, (model.lastSibling ? midY : bounds.getBottom()));
+        g.fillRect (x, midY - 0.6f, (float) play.getX() - 6.0f - x, 1.3f);
     }
 
-    // separator
-    g.setColour (ink.withAlpha (0.18f));
-    g.drawHorizontalLine (getHeight() - 1, (float) play.getX(), bounds.getRight());
+    // row rule
+    g.setColour (ink.withAlpha (0.28f));
+    const float ruleStart = model.depth > 0 ? (float) play.getX() - 4.0f : 0.0f;
+    g.fillRect (ruleStart, bounds.getBottom() - 1.0f, bounds.getRight() - ruleStart, 1.0f);
 
     const auto textColour = (selected ? red : ink).withMultipliedAlpha (alpha);
     g.setColour (textColour);
-    g.setFont (mono (style == Style::loop ? 15.5f : 16.0f, model.depth == 0));
-    g.drawFittedText (model.name, nameArea.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+    g.setFont (condensed (18.5f).withExtraKerningFactor (0.035f));
+    g.drawFittedText (model.name, nameArea.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
 
-    g.setFont (mono (15.0f));
+    g.setFont (condensed (17.0f).withExtraKerningFactor (0.02f));
     g.drawText (model.duration, durationArea, juce::Justification::centred, false);
 
-    g.setColour ((selected ? red : ink).withMultipliedAlpha (alpha));
     drawWaveform (g, waveArea);
 }
 
@@ -248,17 +246,18 @@ void TrackRow::drawWaveform (juce::Graphics& g, juce::Rectangle<float> area) con
         return;
     }
 
-    juce::Path wave;
+    // filled, mirrored envelope like a printed waveform
     const auto n = (int) model.peaks.size();
-    const float step = area.getWidth() / (float) n;
+    const float step = area.getWidth() / (float) juce::jmax (1, n - 1);
     const float mid = area.getCentreY(), half = area.getHeight() * 0.5f;
 
+    juce::Path wave;
+    wave.startNewSubPath (area.getX(), mid);
     for (int i = 0; i < n; ++i)
-    {
-        const float x = area.getX() + (float) i * step;
-        const float amp = juce::jmax (0.5f, model.peaks[(size_t) i] * half);
-        wave.addRectangle (x, mid - amp, juce::jmax (1.0f, step * 0.8f), amp * 2.0f);
-    }
+        wave.lineTo (area.getX() + (float) i * step, mid - juce::jmax (0.6f, model.peaks[(size_t) i] * half));
+    for (int i = n - 1; i >= 0; --i)
+        wave.lineTo (area.getX() + (float) i * step, mid + juce::jmax (0.6f, model.peaks[(size_t) i] * half));
+    wave.closeSubPath();
 
     g.fillPath (wave);
 }

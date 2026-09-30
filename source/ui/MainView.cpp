@@ -39,14 +39,20 @@ namespace
 
 MainView::MainView (DiggaKillaProcessor& p)
     : processor (p),
-      loops ("LOOPS", TrackRow::Style::loop, 42),
-      shots ("ONE-SHOTS", TrackRow::Style::shot, 52),
+      background (theme::skinBackground()),
+      loops (TrackRow::Style::loop, 44, 38),
+      shots (TrackRow::Style::shot, 52, 52),
       fx (p.getParameters())
 {
     setOpaque (true);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &header, &loops, &shots, &record, &fx })
+    for (auto* c : std::initializer_list<juce::Component*> { &tempo, &tempo.doubleButton, &tempo.halveButton,
+                                                             &loops, &shots, &record, &fx })
         addAndMakeVisible (c);
+
+    // enabled once tempo detection exists (phase 2)
+    tempo.doubleButton.setEnabled (false);
+    tempo.halveButton.setEnabled (false);
 
     loops.setRows (placeholderLoops());
     shots.setRows (placeholderShots());
@@ -73,21 +79,20 @@ MainView::~MainView()
 
 void MainView::paint (juce::Graphics& g)
 {
-    paper.draw (g, getLocalBounds());
-
-    g.setColour (theme::ink);
-    g.fillRect (30.0f, 204.0f, 1284.0f, 2.5f);      // under the title
-    g.fillRect (30.0f, 692.0f, 1284.0f, 2.0f);      // above the FX strip
-    g.fillRect (962.0f, 214.0f, 1.5f, 470.0f);      // one-shots divider
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (background, getLocalBounds().toFloat());
 }
 
+// All positions are design pixels measured on docs/design.png.
 void MainView::resized()
 {
-    header.setBounds (28, 0, 1288, 200);
-    loops.setBounds (28, 212, 492, 472);
-    record.setBounds (522, 222, 432, 432);
-    shots.setBounds (972, 212, 344, 472);
-    fx.setBounds (28, 698, 1288, 186);
+    tempo.setBounds (TempoDisplay::textBounds);
+    tempo.doubleButton.setBounds (1250, 47, 36, 28);
+    tempo.halveButton.setBounds (1287, 47, 36, 28);
+    loops.setBounds (28, 263, 500, 424);
+    shots.setBounds (978, 262, 340, 424);
+    record.setBounds (525, 226, 428, 428);
+    fx.setBounds (FxPanel::designBounds);
 }
 
 void MainView::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -105,7 +110,7 @@ void MainView::timerCallback()
 {
     const auto& player = processor.getPlayer();
     record.setPlayback (player.isPlaying(), player.getProgress());
-    header.tempo.setProjectBpm (processor.getHostBpm());
+    tempo.setProjectBpm (processor.getHostBpm());
 }
 
 } // namespace digga

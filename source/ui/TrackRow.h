@@ -14,11 +14,13 @@ public:
     PlayButton();
     void setPlaying (bool shouldShowStop);
     bool isShowingStop() const noexcept { return playing; }
+    void setRowSelected (bool isSelected);
 
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
 
 private:
     bool playing = false;
+    bool rowSelected = false;
 };
 
 /** Rubber-stamp "KILL" button: muted grey until hovered or its row is selected. */
@@ -86,7 +88,7 @@ private:
     bool selected = false;
     juce::Rectangle<float> nameArea, waveArea, durationArea;
 
-    static constexpr int indentPerLevel = 52;
+    static constexpr int indentPerLevel = 51;
 };
 
 } // namespace digga

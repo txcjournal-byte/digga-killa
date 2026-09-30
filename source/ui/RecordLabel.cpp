@@ -20,16 +20,33 @@ RecordLabel::RecordLabel()
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
 }
 
+// Geometry of the printed record in docs/design.png (absolute design pixels).
+namespace
+{
+    constexpr float discCentreX = 739.0f, discCentreY = 440.0f, discRadius = 212.0f, labelRadius = 205.0f;
+    const juce::Rectangle<float> dropSampleArea { 612.0f, 332.0f, 260.0f, 140.0f };
+    const juce::Rectangle<float> titleArea      { 620.0f, 338.0f, 238.0f, 58.0f };
+    constexpr float infoY = 414.0f, playY = 458.0f;
+}
+
 juce::Rectangle<float> RecordLabel::getDisc() const
 {
-    const auto bounds = getLocalBounds().toFloat();
-    const float size = juce::jmin (bounds.getWidth(), bounds.getHeight()) - 4.0f;
-    return bounds.withSizeKeepingCentre (size, size);
+    return juce::Rectangle<float> (discRadius * 2.0f, discRadius * 2.0f).withCentre (toLocal (juce::Point<float> (discCentreX, discCentreY)));
+}
+
+juce::Point<float> RecordLabel::toLocal (juce::Point<float> designPoint) const
+{
+    return designPoint - getPosition().toFloat();
+}
+
+juce::Rectangle<float> RecordLabel::toLocal (juce::Rectangle<float> designArea) const
+{
+    return designArea - getPosition().toFloat();
 }
 
 bool RecordLabel::hitTest (int x, int y)
 {
-    return getDisc().getCentre().getDistanceFrom ({ (float) x, (float) y }) <= getDisc().getWidth() * 0.5f;
+    return getDisc().getCentre().getDistanceFrom ({ (float) x, (float) y }) <= discRadius;
 }
 
 void RecordLabel::setStatus (SampleStore::Status newStatus, const SampleStore::Info& newInfo)
@@ -53,115 +70,78 @@ void RecordLabel::setPlayback (bool isPlaying, float newProgress)
 
 void RecordLabel::resized()
 {
-    const auto disc = getDisc();
-    const float labelR = disc.getWidth() * 0.5f * 0.88f;
-    playButton.setBounds (juce::Rectangle<int> (40, 40).withCentre (
-        disc.getCentre().translated (0.0f, labelR * 0.3f).toInt()));
+    playButton.setBounds (juce::Rectangle<int> (34, 34).withCentre (toLocal (juce::Point<float> (discCentreX, playY)).toInt()));
 }
 
 void RecordLabel::paint (juce::Graphics& g)
 {
     using namespace theme;
-    const auto disc = getDisc();
-    const auto centre = disc.getCentre();
-    const float r = disc.getWidth() * 0.5f;
+    const auto centre = toLocal (juce::Point<float> (discCentreX, discCentreY));
 
-    // grooves peeking out around the label
-    for (int i = 0; i < 14; ++i)
+    if (dragOver)
     {
-        const float rr = r - 2.0f - (float) i * 1.6f;
-        g.setColour (ink.withAlpha (i == 0 ? 0.9f : 0.05f + 0.05f * (float) (i % 3)));
-        g.drawEllipse (juce::Rectangle<float> (rr * 2.0f, rr * 2.0f).withCentre (centre), i == 0 ? 3.0f : 0.8f);
+        g.setColour (red);
+        g.drawEllipse (juce::Rectangle<float> (labelRadius * 2.0f, labelRadius * 2.0f).withCentre (centre), 3.0f);
     }
 
-    const float labelR = r * 0.88f;
-    const auto label = juce::Rectangle<float> (labelR * 2.0f, labelR * 2.0f).withCentre (centre);
-
-    g.setColour (paperLight.withAlpha (0.55f));
-    g.fillEllipse (label);
-
-    juce::Path labelPath;
-    labelPath.addEllipse (label);
-    theme::addGrunge (g, labelPath, juce::Colour (0xff6b5c43).withAlpha (0.25f), 77, 0.25f);
-
-    g.setColour ((dragOver ? red : ink).withAlpha (0.85f));
-    g.drawEllipse (label, dragOver ? 3.0f : 1.6f);
-
-    // playback progress around the label edge
     if (playing && progress > 0.0f)
     {
         juce::Path arc;
-        arc.addCentredArc (centre.x, centre.y, labelR + 5.0f, labelR + 5.0f, 0.0f, 0.0f,
+        arc.addCentredArc (centre.x, centre.y, discRadius + 5.0f, discRadius + 5.0f, 0.0f, 0.0f,
                            progress * juce::MathConstants<float>::twoPi, true);
         g.setColour (red);
         g.strokePath (arc, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
-    // wordmark
-    drawLogo (g, juce::Rectangle<float> (labelR * 0.62f, labelR * 0.14f)
-                     .withCentre (centre.translated (0.0f, -labelR * 0.62f)),
-              juce::Justification::centred);
-
-    // spindle hole
-    const float holeR = r * 0.065f;
-    g.setColour (ink);
-    g.fillEllipse (juce::Rectangle<float> (holeR * 2.0f, holeR * 2.0f).withCentre (centre.translated (0.0f, labelR * 0.56f)));
-
-    // main message
-    auto message = juce::Rectangle<float> (labelR * 1.3f, labelR * 0.8f).withCentre (centre.translated (0.0f, -labelR * 0.1f));
-
-    auto stampText = [&] (const juce::String& line1, const juce::String& line2, juce::Colour colour)
+    auto stampText = [&] (const juce::String& text, juce::Rectangle<float> area, juce::Colour colour)
     {
-        auto top = message.withHeight (message.getHeight() * 0.5f).reduced (0.0f, 4.0f);
-        auto bottom = top.translated (0.0f, message.getHeight() * 0.5f);
-        juce::Path text = textPath (line1, display (100.0f), top, false);
-        text.addPath (textPath (line2, display (100.0f), bottom, false));
         g.setColour (colour);
-        g.fillPath (text);
-        g.strokePath (text, juce::PathStrokeType (1.5f));
-        addGrunge (g, text, paper, 99, 1.2f);
+        g.fillPath (textPath (text, display (100.0f, 0.8f), toLocal (area), false));
     };
 
-    auto smallText = [&] (const juce::String& text, float y, juce::Colour colour, bool bold)
+    auto smallText = [&] (const juce::String& text, float y, juce::Colour colour)
     {
         g.setColour (colour);
-        g.setFont (mono (16.0f, bold));
-        g.drawFittedText (text, juce::Rectangle<float> (labelR * 1.4f, 22.0f).withCentre (centre.translated (0.0f, y)).toNearestInt(),
-                          juce::Justification::centred, 1, 0.7f);
+        g.setFont (condensed (18.0f, true));
+        g.drawFittedText (text, toLocal (juce::Rectangle<float> (300.0f, 22.0f).withCentre ({ discCentreX, y })).toNearestInt(),
+                          juce::Justification::centred, 1, 0.8f);
     };
 
     switch (status)
     {
         case SampleStore::Status::empty:
-            stampText ("DROP", "SAMPLE", dragOver ? red : ink);
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            if (dragOver)
+            {
+                g.setColour (red);
+                g.drawImage (skinDropSample(), toLocal (dropSampleArea), juce::RectanglePlacement::stretchToFit, true);
+            }
+            else
+            {
+                g.drawImage (skinDropSample(), toLocal (dropSampleArea), juce::RectanglePlacement::stretchToFit);
+            }
             break;
 
         case SampleStore::Status::loading:
-            stampText ("DIGGING", "...", ink);
-            smallText (info.file.getFileName(), labelR * 0.34f, inkSoft, false);
+            stampText ("DIGGING...", titleArea, ink);
+            smallText (info.file.getFileName(), infoY, inkSoft);
             break;
 
         case SampleStore::Status::error:
-            stampText ("NO", "DICE", red);
-            smallText (info.error.toUpperCase(), labelR * 0.34f, red, true);
+            stampText ("NO DICE", titleArea, red);
+            smallText (info.error.toUpperCase(), infoY, red);
             break;
 
         case SampleStore::Status::ready:
         {
-            message = message.withSizeKeepingCentre (message.getWidth(), message.getHeight() * 0.5f)
-                             .translated (0.0f, -labelR * 0.14f);
             const auto name = info.file.getFileNameWithoutExtension().toUpperCase();
-            const auto text = textPath (name.length() > 18 ? name.substring (0, 17) + "." : name,
-                                        display (100.0f), message, false);
-            g.setColour (dragOver ? red : ink);
-            g.fillPath (text);
-            addGrunge (g, text, paper, 12, 1.0f);
+            stampText (name.length() > 16 ? name.substring (0, 15) + "." : name, titleArea, dragOver ? red : ink);
 
             const juce::String dot (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
             smallText (formatTime (info.lengthSeconds) + dot
                            + juce::String (info.fileSampleRate / 1000.0, 1) + " kHz" + dot
                            + (info.numChannels == 1 ? "MONO" : "STEREO"),
-                       labelR * 0.06f, inkSoft, true);
+                       infoY, inkSoft);
             break;
         }
     }

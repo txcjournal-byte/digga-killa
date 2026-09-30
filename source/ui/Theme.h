@@ -20,12 +20,17 @@ struct Typefaces
 {
     Typefaces();
 
-    juce::Typeface::Ptr display;   // Anton (OFL) – heavy condensed headlines
-    juce::Typeface::Ptr mono;      // Courier Prime (OFL) – typewriter labels
+    juce::Typeface::Ptr display;         // Archivo Black (OFL) – brutal poster headlines
+    juce::Typeface::Ptr condensed;       // Barlow Condensed SemiBold (OFL) – tracklist rows
+    juce::Typeface::Ptr condensedBold;   // Barlow Condensed Bold
+    juce::Typeface::Ptr mono;            // Courier Prime (OFL) – typewriter labels
     juce::Typeface::Ptr monoBold;
 };
 
-juce::Font display (float height);
+/** Heavy headline face. horizontalScale < 1 squeezes it towards the
+    condensed poster look of the reference. */
+juce::Font display (float height, float horizontalScale = 1.0f);
+juce::Font condensed (float height, bool bold = false);
 juce::Font mono (float height, bool bold = false);
 
 /** Glyphs of a single line of text as a path, fitted into an area. With
@@ -39,8 +44,9 @@ juce::Path textPath (const juce::String& text, const juce::Font& font,
 void addGrunge (juce::Graphics& g, const juce::Path& clip, juce::Colour speckColour,
                 int seed, float density);
 
-/** The "TrapVST" wordmark: black "Trap", red "VST". */
-void drawLogo (juce::Graphics& g, juce::Rectangle<float> area,
-               juce::Justification justification = juce::Justification::centredLeft);
+// ---- skin artwork cut from docs/design.png by tools/make_skin.py
+juce::Image skinBackground();   // full panel, design pixel size (1344 x 896)
+juce::Image skinDropSample();   // "DROP SAMPLE" print, ink + alpha
+juce::Image skinKillStamp();    // KILL rubber stamp, red + alpha
 
 } // namespace digga::theme

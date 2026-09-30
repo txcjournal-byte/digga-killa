@@ -44,9 +44,14 @@ juce_add_plugin(DiggaKilla
 
 juce_add_binary_data(DiggaKillaAssets
     SOURCES
-        assets/fonts/Anton-Regular.ttf
+        assets/fonts/ArchivoBlack-Regular.ttf
+        assets/fonts/BarlowCondensed-SemiBold.ttf
+        assets/fonts/BarlowCondensed-Bold.ttf
         assets/fonts/CourierPrime-Regular.ttf
-        assets/fonts/CourierPrime-Bold.ttf)
+        assets/fonts/CourierPrime-Bold.ttf
+        assets/skin/background.png
+        assets/skin/drop_sample.png
+        assets/skin/kill_stamp.png)
 
 target_sources(DiggaKilla PRIVATE
     source/PluginProcessor.cpp
@@ -56,8 +61,7 @@ target_sources(DiggaKilla PRIVATE
     source/playback/SamplePlayer.cpp
     source/ui/Theme.cpp
     source/ui/DiggaLookAndFeel.cpp
-    source/ui/PaperBackground.cpp
-    source/ui/Header.cpp
+    source/ui/TempoDisplay.cpp
     source/ui/RecordLabel.cpp
     source/ui/TrackRow.cpp
     source/ui/TrackColumn.cpp

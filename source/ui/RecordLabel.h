@@ -34,6 +34,8 @@ public:
 
 private:
     juce::Rectangle<float> getDisc() const;
+    juce::Point<float> toLocal (juce::Point<float> designPoint) const;
+    juce::Rectangle<float> toLocal (juce::Rectangle<float> designArea) const;
     void openFileChooser();
 
     SampleStore::Status status = SampleStore::Status::empty;
