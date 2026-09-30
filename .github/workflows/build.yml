@@ -1,0 +1,30 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item -Recurse "build/DiggaKilla_artefacts/Release/VST3/Digga Killa.vst3" out/
+          Copy-Item "build/DiggaKilla_artefacts/Release/Standalone/Digga Killa.exe" out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiggaKilla-Windows
+          path: out/
