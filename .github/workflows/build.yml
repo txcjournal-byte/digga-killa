@@ -9,10 +9,10 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -A x64
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -24,7 +24,7 @@ jobs:
           Copy-Item -Recurse "build/DiggaKilla_artefacts/Release/VST3/Digga Killa.vst3" out/
           Copy-Item "build/DiggaKilla_artefacts/Release/Standalone/Digga Killa.exe" out/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: DiggaKilla-Windows
           path: out/

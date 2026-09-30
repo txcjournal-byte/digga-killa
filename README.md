@@ -39,10 +39,10 @@ Požadavky: CMake ≥ 3.22, kompilátor s C++20. JUCE 8.0.9 se stáhne automatic
 
 ### Windows (hlavní cíl, FL Studio)
 
-Visual Studio 2022 s workloadem *Desktop development with C++*:
+Visual Studio 2022 nebo novější s workloadem *Desktop development with C++*:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -A x64
 cmake --build build --config Release
 ```
 
