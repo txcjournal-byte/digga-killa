@@ -49,8 +49,15 @@ MainView::MainView (DiggaKillaProcessor& p)
     setWantsKeyboardFocus (true);
 
     for (auto* c : std::initializer_list<juce::Component*> { &tempo, &tempo.doubleButton, &tempo.halveButton,
-                                                             &loops, &shots, &record, &fx })
+                                                             &format, &loops, &shots, &record, &fx })
         addAndMakeVisible (c);
+
+    format.setMidi (processor.isDragAsMidi());
+    format.onChange = [this] (bool midi)
+    {
+        processor.setDragAsMidi (midi);
+        prefetchMidi();
+    };
 
     auto& engine = processor.getEngine();
 
@@ -104,6 +111,7 @@ void MainView::wireColumn (TrackColumn& column)
     {
         engine.select (id);
         grabKeyboardFocus();
+        prefetchMidi();
     };
     column.onPlay = [this] (int id) { togglePreview (id); };
     column.onKill = [this, &engine] (int id)
@@ -133,6 +141,7 @@ void MainView::resized()
     tempo.setBounds (TempoDisplay::textBounds);
     tempo.doubleButton.setBounds (1250, 47, 36, 28);
     tempo.halveButton.setBounds (1287, 47, 36, 28);
+    format.setBounds (1150, 84, 173, 28);
     loops.setBounds (28, 263, 500, 424);
     shots.setBounds (978, 262, 340, 424);
     record.setBounds (525, 226, 428, 428);
@@ -287,6 +296,16 @@ void MainView::showRowMenu (int id)
     });
 }
 
+void MainView::prefetchMidi()
+{
+    // transcribing takes a moment: start on the selected row before it is dragged
+    if (! processor.isDragAsMidi())
+        return;
+    const auto& engine = processor.getEngine();
+    if (const auto* node = engine.getTree().find (engine.getSelected()))
+        transcriptions.prefetch (node->audio, engine.getSampleRate());
+}
+
 void MainView::dragOut (int id)
 {
     auto& engine = processor.getEngine();
@@ -294,19 +313,36 @@ void MainView::dragOut (int id)
     if (node == nullptr || node->audio == nullptr)
         return;
 
-    exporter::Request request;
-    request.audio = node->audio;
-    request.isLoop = node->kind == ClipKind::loop;
-    request.reverse = processor.isReverseOn();
-    request.fx = processor.getFxParams();
-    request.fx.bpm = engine.getProjectBpm();
-    request.sampleRate = engine.getSampleRate();
-
     const auto* a = engine.getAnalysis();
-    request.fileName = exporter::makeFileName (node->fileTag(), engine.getProjectBpm(), a != nullptr ? a->keyName : juce::String());
+    const auto fileName = exporter::makeFileName (node->fileTag(), engine.getProjectBpm(), a != nullptr ? a->keyName : juce::String());
+    juce::File file;
 
     juce::MouseCursor::showWaitCursor();
-    const auto file = exporter::renderToTempFile (request);
+
+    if (processor.isDragAsMidi())
+    {
+        midi::ExportOptions options;
+        options.bpm = engine.getProjectBpm();
+        options.lengthSeconds = node->lengthSeconds (engine.getSampleRate());
+        options.transpose = juce::roundToInt (processor.getFxParams().pitch);
+        options.reverse = processor.isReverseOn();
+
+        if (const auto notes = transcriptions.get (node->audio, engine.getSampleRate()))
+            file = midi::writeToTempFile (*notes, options, fileName);
+    }
+    else
+    {
+        exporter::Request request;
+        request.audio = node->audio;
+        request.isLoop = node->kind == ClipKind::loop;
+        request.reverse = processor.isReverseOn();
+        request.fx = processor.getFxParams();
+        request.fx.bpm = engine.getProjectBpm();
+        request.sampleRate = engine.getSampleRate();
+        request.fileName = fileName;
+        file = exporter::renderToTempFile (request);
+    }
+
     juce::MouseCursor::hideWaitCursor();
 
     if (file.existsAsFile())

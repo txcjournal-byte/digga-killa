@@ -30,7 +30,8 @@ Všechny fáze zadání jsou hotové a připravené k testu ve FL Studiu.
    - Ctrl+Z (Cmd+Z): undo posledního KILL
 5. **Piano Roll:** klikni na řádek (zčervená) a hraj notami. One-shot: chromaticky, MIDI nota 60 = původní výška (ve FL Studiu se zobrazuje jako C5). Loop: nota ho spustí od začátku a hraje, dokud ji držíš.
 6. **Efekty** dole platí pro přehrávání i export. REVERSE přehrává pozpátku.
-7. **Do projektu:** chyť úchyt ⠿ u řádku a přetáhni ho do Playlistu nebo Browseru ve FL. Vyrenderuje se WAV s efekty, např. `DiggaKilla_A2_KillMix3_140bpm_F#m.wav`. Soubory jsou v dočasné složce `%TEMP%\DiggaKilla`.
+7. **Do projektu:** chyť řádek (kdekoli, nebo za úchyt ⠿) a přetáhni ho do Playlistu nebo Browseru ve FL. Vyrenderuje se WAV s efekty, např. `DiggaKilla_A2_KillMix3_140bpm_F#m.wav`. Soubory jsou v dočasné složce `%TEMP%\DiggaKilla`.
+   - Přepínač **DRAG AS WAV / MIDI** vpravo nahoře: v režimu MIDI se loop nebo one-shot převede na noty (Basic Pitch, i akordy) a přetáhne se jako `.mid` v tempu projektu. Knob PITCH noty transponuje, REVERSE je otočí.
 8. **Uložení projektu** uloží cestu k samplu, nastavení a seedy celého stromu. Po otevření se vše přesně obnoví (sampl musí zůstat na stejném místě).
 
 ## Build
@@ -97,11 +98,13 @@ source/
   kill/               KillEngine (přeskládání, reverse, stupnice, halftime, stutter, filtr, výpadky)
   dsp/                Stretcher (offline), FxChain (efekty, realtime i offline)
   export/             Exporter (WAV pro přetažení do DAW)
+  midi/               BasicPitch (audio → noty, nativně v C++), MidiExport (.mid, cache)
   playback/           SamplePlayer (náhled zdroje), ClipPlayer (náhledy, MIDI, bez alokací)
   ui/                 Theme (barvy, fonty, skin), LookAndFeel, TempoDisplay, RecordLabel,
                       TrackRow / TrackColumn, FxPanel, MainView
 tools/Snapshot.cpp    headless snímek UI (i s ukázkovými řádky jako v designu)
 tools/make_skin.py    generátor skinu z docs/design.png
+tools/export_basic_pitch.py   export vah Basic Pitch z nmp.onnx
 assets/skin/          pozadí a sprity vyříznuté z designu
 assets/fonts/         Archivo Black, Barlow Condensed, Courier Prime (SIL OFL)
 ```
@@ -120,6 +123,7 @@ Pravidla pro vlákna:
 | VST3 SDK (součást JUCE) | MIT (SDK 3.8+) |
 | libFLAC (součást JUCE) | BSD |
 | signalsmith-stretch 1.4.0 + signalsmith-linear 0.6.4 (`third_party/`) | MIT |
+| Basic Pitch (Spotify), váhy modelu `assets/models/basic_pitch.bin` | Apache 2.0 (`third_party/basic-pitch/LICENSE`) |
 | Archivo Black, Barlow Condensed, Courier Prime | SIL Open Font License 1.1 (`assets/fonts/*-OFL.txt`) |
 | pluginval (jen testovací nástroj, nelinkuje se) | GPLv3 |
 

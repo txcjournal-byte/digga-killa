@@ -1,5 +1,7 @@
 #pragma once
 
+#include "midi/MidiExport.h"
+#include "ui/FormatSwitch.h"
 #include "ui/FxPanel.h"
 #include "ui/RecordLabel.h"
 #include "ui/TempoDisplay.h"
@@ -38,16 +40,19 @@ private:
     void togglePreview (int id);
     void showRowMenu (int id);
     void dragOut (int id);
+    void prefetchMidi();
 
     DiggaKillaProcessor& processor;
     juce::SharedResourcePointer<theme::Typefaces> typefaces;
     juce::Image background;
 
     TempoDisplay tempo;
+    FormatSwitch format;
     TrackColumn loops, shots;
     RecordLabel record;
     FxPanel fx;
     juce::TooltipWindow tooltips { this, 600 };
+    midi::TranscriptionCache transcriptions;
 };
 
 } // namespace digga

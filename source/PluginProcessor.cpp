@@ -211,6 +211,7 @@ void DiggaKillaProcessor::getStateInformation (juce::MemoryBlock& destData)
     root.setProperty ("version", stateVersion, nullptr);
     root.setProperty (samplePathProperty, sampleStore.getInfo().file.getFullPathName(), nullptr);
     root.setProperty ("editorWidth", editorWidth.load(), nullptr);
+    root.setProperty ("dragAsMidi", dragAsMidi.load(), nullptr);
     root.addChild (parameters.copyState(), -1, nullptr);
     root.addChild (engine.getState(), -1, nullptr);
 
@@ -229,6 +230,7 @@ void DiggaKillaProcessor::setStateInformation (const void* data, int sizeInBytes
         return;
 
     editorWidth.store ((int) root.getProperty ("editorWidth", 0));
+    dragAsMidi.store ((bool) root.getProperty ("dragAsMidi", false));
 
     const auto params = root.getChildWithName (parameters.state.getType());
     if (params.isValid())

@@ -5,6 +5,8 @@
 // Usage: DiggaKillaSnapshot <outDir> [sample]
 #include "PluginProcessor.h"
 #include "export/Exporter.h"
+#include "midi/BasicPitch.h"
+#include "midi/MidiExport.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -90,8 +92,48 @@ namespace
     }
 }
 
+/** bpwindow <in.f32> <out.f32>: raw model on one 43844-sample window.
+    bptranscribe <in.f32 @22050> <out.txt>: full transcription, one note per line. */
+static int basicPitchTool (char** argv)
+{
+    const juce::String mode (argv[1]);
+    juce::MemoryBlock data;
+    juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]).loadFileAsData (data);
+    const auto* x = static_cast<const float*> (data.getData());
+    const int n = (int) (data.getSize() / sizeof (float));
+    const auto out = juce::File::getCurrentWorkingDirectory().getChildFile (argv[3]);
+
+    if (mode == "bpwindow")
+    {
+        std::vector<float> note (172 * 88), onset (172 * 88), contour (172 * 264);
+        midi::runModelWindow (x, note.data(), onset.data(), contour.data());
+        juce::MemoryBlock result;
+        result.append (note.data(), note.size() * sizeof (float));
+        result.append (onset.data(), onset.size() * sizeof (float));
+        result.append (contour.data(), contour.size() * sizeof (float));
+        out.replaceWithData (result.getData(), result.getSize());
+        return 0;
+    }
+
+    juce::AudioBuffer<float> audio (1, n);
+    audio.copyFrom (0, 0, x, n);
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    const auto notes = midi::transcribe (audio, 22050.0);
+    std::printf ("transcribed %.1f s of audio in %.2f s: %d notes\n", n / 22050.0,
+                 (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0, (int) notes.size());
+    juce::String text;
+    for (const auto& note : notes)
+        text << juce::String (note.startSeconds, 4) << " " << juce::String (note.endSeconds, 4) << " "
+             << note.pitch << " " << juce::String (note.amplitude, 4) << "\n";
+    out.replaceWithText (text);
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 3 && juce::String (argv[1]).startsWith ("bp"))
+        return basicPitchTool (argv);
+
     const juce::ScopedJuceInitialiser_GUI gui;
     const auto cwd = juce::File::getCurrentWorkingDirectory();
     const auto outDir = argc > 1 ? cwd.getChildFile (argv[1]) : cwd;
@@ -210,6 +252,25 @@ int main (int argc, char** argv)
                 request.fx.pitch = 5.0f;
                 request.isLoop = false;
                 check (exporter::render (request).getNumSamples() > 0, "pitched export renders");
+
+                // MIDI drag: transcribe the loop and write a .mid
+                const auto midiStart = juce::Time::getMillisecondCounterHiRes();
+                const auto notes = midi::transcribe (*node->audio, engine.getSampleRate());
+                midi::ExportOptions options;
+                options.bpm = engine.getProjectBpm();
+                options.lengthSeconds = node->lengthSeconds (engine.getSampleRate());
+                const auto midiFile = midi::writeToTempFile (notes, options, request.fileName);
+                std::printf ("  MIDI: %d notes in %.2f s -> %s\n", (int) notes.size(),
+                             (juce::Time::getMillisecondCounterHiRes() - midiStart) / 1000.0, midiFile.getFileName().toRawUTF8());
+
+                juce::MidiFile readBack;
+                juce::FileInputStream in (midiFile);
+                int noteOns = 0;
+                if (in.openedOk() && readBack.readFrom (in))
+                    for (int t = 0; t < readBack.getNumTracks(); ++t)
+                        for (const auto* e : *readBack.getTrack (t))
+                            noteOns += e->message.isNoteOn() ? 1 : 0;
+                check (noteOns > 0 && noteOns <= (int) notes.size(), "MIDI file has the transcribed notes");
             });
 
             std::printf ("\nSTATE SAVE / RESTORE\n");

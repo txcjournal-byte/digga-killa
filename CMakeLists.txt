@@ -51,7 +51,8 @@ juce_add_binary_data(DiggaKillaAssets
         assets/fonts/CourierPrime-Bold.ttf
         assets/skin/background.png
         assets/skin/drop_sample.png
-        assets/skin/kill_stamp.png)
+        assets/skin/kill_stamp.png
+        assets/models/basic_pitch.bin)
 
 target_sources(DiggaKilla PRIVATE
     source/PluginProcessor.cpp
@@ -69,11 +70,14 @@ target_sources(DiggaKilla PRIVATE
     source/dsp/Stretcher.cpp
     source/dsp/FxChain.cpp
     source/export/Exporter.cpp
+    source/midi/BasicPitch.cpp
+    source/midi/MidiExport.cpp
     source/playback/SamplePlayer.cpp
     source/playback/ClipPlayer.cpp
     source/ui/Theme.cpp
     source/ui/DiggaLookAndFeel.cpp
     source/ui/TempoDisplay.cpp
+    source/ui/FormatSwitch.cpp
     source/ui/RecordLabel.cpp
     source/ui/TrackRow.cpp
     source/ui/TrackColumn.cpp

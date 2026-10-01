@@ -75,6 +75,10 @@ public:
     int getEditorWidth() const noexcept { return editorWidth.load(); }
     void setEditorWidth (int width) noexcept { editorWidth.store (width); }
 
+    /** Drag-to-DAW format: WAV (false) or MIDI (true); saved with the project. */
+    bool isDragAsMidi() const noexcept { return dragAsMidi.load(); }
+    void setDragAsMidi (bool midi) noexcept { dragAsMidi.store (midi); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void timerCallback() override;
@@ -98,7 +102,8 @@ private:
     std::atomic<double> hostBpm { 0.0 };
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<double> fallbackBpm { 120.0 };
-    std::atomic<int> editorWidth { 0 };   // project tempo when the host has none
+    std::atomic<int> editorWidth { 0 };
+    std::atomic<bool> dragAsMidi { false };   // project tempo when the host has none
     int maxBlockSize = 512;
     double pendingHostBpm = 0.0;
     int hostBpmStableTicks = 0;
