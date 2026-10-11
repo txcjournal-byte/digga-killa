@@ -34,6 +34,14 @@ juce::Font bold (float height);
 juce::Font body (float height);
 juce::Font mono (float height, bool semiBold = false);
 
+/** The TrapWin logo (chrome TRAPWIN, stars, "AUDIO · UNDERGROUND"), as on
+    the other TrapWin plugins; transparent background. */
+juce::Image logo();
+
+/** Draws the logo fitted into an area, keeping its proportions. */
+void drawLogo (juce::Graphics&, juce::Rectangle<float> area,
+               juce::RectanglePlacement placement = juce::RectanglePlacement::centred);
+
 /** Upper-case mono label with the web's wide letter spacing. */
 void drawMonoLabel (juce::Graphics&, const juce::String& text, juce::Rectangle<float> area,
                     juce::Justification, juce::Colour colour, float height = 11.0f);

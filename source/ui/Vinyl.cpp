@@ -89,19 +89,20 @@ void Vinyl::paint (juce::Graphics& g)
         }
     }
 
-    // chrome label
-    const float lr = r * 0.38f;
-    juce::Path label;
-    label.addEllipse (juce::Rectangle<float> (lr * 2.0f, lr * 2.0f).withCentre (c));
-    fillChrome (g, label, false);
-    const auto wordmark = textPath ("TRAPWIN", display (40.0f), juce::Rectangle<float> (lr * 1.3f, lr * 0.32f).withCentre (c.translated (0.0f, -lr * 0.42f)), juce::Justification::centred);
-    g.setColour (well);
-    g.fillPath (wordmark);
-    g.setColour (well.withAlpha (0.8f));
-    g.setFont (mono (lr * 0.15f, true).withExtraKerningFactor (0.2f));
-    g.drawText ("SAMPLE", juce::Rectangle<float> (lr * 1.4f, lr * 0.25f).withCentre (c.translated (0.0f, lr * 0.45f)), juce::Justification::centred, false);
+    // label: dark centre with a chrome rim and the TrapWin logo
+    const float lr = r * 0.54f;
+    const auto labelArea = juce::Rectangle<float> (lr * 2.0f, lr * 2.0f).withCentre (c);
+    juce::Path rim;
+    rim.addEllipse (labelArea);
+    fillChrome (g, rim, false);
+    g.setGradientFill (juce::ColourGradient (card2.brighter (0.08f), c.x, c.y - lr, well, c.x, c.y + lr, false));
+    g.fillEllipse (labelArea.reduced (lr * 0.06f));
+    drawLogo (g, juce::Rectangle<float> (lr * 1.72f, lr * 0.66f).withCentre (c.translated (0.0f, -lr * 0.3f)));
+    g.setColour (text2);
+    g.setFont (mono (lr * 0.13f, true).withExtraKerningFactor (0.24f));
+    g.drawText ("SAMPLE", juce::Rectangle<float> (lr * 1.4f, lr * 0.22f).withCentre (c.translated (0.0f, lr * 0.62f)), juce::Justification::centred, false);
     g.setColour (bg);
-    g.fillEllipse (juce::Rectangle<float> (lr * 0.18f, lr * 0.18f).withCentre (c));
+    g.fillEllipse (juce::Rectangle<float> (lr * 0.12f, lr * 0.12f).withCentre (c.translated (0.0f, lr * 0.3f)));
 
     // progress / busy ring
     if (playing || busy)

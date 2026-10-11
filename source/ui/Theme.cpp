@@ -28,6 +28,18 @@ juce::Font bold (float h)             { return make (&Typefaces::bold, h); }
 juce::Font body (float h)             { return make (&Typefaces::body, h); }
 juce::Font mono (float h, bool semi)  { return make (semi ? &Typefaces::monoBold : &Typefaces::mono, h); }
 
+juce::Image logo()
+{
+    return juce::ImageCache::getFromMemory (BinaryData::trapwin_logo_png, BinaryData::trapwin_logo_pngSize);
+}
+
+void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePlacement placement)
+{
+    const juce::Graphics::ScopedSaveState state (g);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (logo(), area, placement);
+}
+
 void drawMonoLabel (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> area,
                     juce::Justification j, juce::Colour colour, float height)
 {

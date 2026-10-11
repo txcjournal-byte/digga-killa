@@ -69,12 +69,11 @@ void Header::resized()
 
 void Header::paint (juce::Graphics& g)
 {
-    // wordmark: TRAPWIN in liquid chrome + SAMPLE pill
-    auto wm = wordmarkArea.withSizeKeepingCentre (wordmarkArea.getWidth(), 46.0f);
-    const auto word = textPath ("TRAPWIN", display (60.0f), wm.removeFromLeft (250.0f), juce::Justification::centredLeft);
-    fillChrome (g, word);
+    // the TrapWin logo exactly as on the other plugins, product pill beside it
+    const auto logoArea = wordmarkArea.withSizeKeepingCentre (wordmarkArea.getWidth(), 80.0f).withWidth (220.0f);
+    drawLogo (g, logoArea, juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
 
-    const auto pill = juce::Rectangle<float> (word.getBounds().getRight() + 14.0f, wm.getCentreY() - 13.0f, 96.0f, 26.0f);
+    const auto pill = juce::Rectangle<float> (logoArea.getRight() + 12.0f, logoArea.getCentreY() - 13.0f, 96.0f, 26.0f);
     g.setColour (juce::Colour (0xffe6eaf2));
     g.fillRoundedRectangle (pill, 13.0f);
     g.setColour (well);

@@ -42,6 +42,7 @@ juce_add_plugin(TrapWinSample
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD     FALSE
     HARDENED_RUNTIME_ENABLED    TRUE
+    ICON_BIG                    assets/brand/app_icon.png
     VST3_CATEGORIES             Instrument Sampler
     AU_MAIN_TYPE                kAudioUnitType_MusicDevice
     FORMATS                     VST3 AU Standalone)
@@ -53,7 +54,8 @@ juce_add_binary_data(TrapWinAssets
         assets/fonts/Archivo-SemiBold.ttf
         assets/fonts/IBMPlexMono-Medium.ttf
         assets/fonts/IBMPlexMono-SemiBold.ttf
-        assets/models/basic_pitch.bin)
+        assets/models/basic_pitch.bin
+        assets/brand/trapwin_logo.png)
 
 target_sources(TrapWinSample PRIVATE
     source/PluginProcessor.cpp
