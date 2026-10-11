@@ -88,7 +88,7 @@ SpectralFeatures describe (const float* mono, int numSamples, double sampleRate)
         return f;
 
     const double binHz = sampleRate / fftSize;
-    double total = 0, weighted = 0, low = 0, logSum = 0, energy = 0;
+    double total = 0, weighted = 0, low = 0, mid = 0, high = 0, logSum = 0, energy = 0;
     int flatBins = 0;
 
     for (int k = 1; k < numBins; ++k)
@@ -100,6 +100,10 @@ SpectralFeatures describe (const float* mono, int numSamples, double sampleRate)
         energy += m * m;
         if (hz < 150.0)
             low += m * m;
+        else if (hz < 2500.0)
+            mid += m * m;
+        else if (hz > 5000.0)
+            high += m * m;
         if (hz > 40.0 && hz < 12000.0)
         {
             logSum += std::log (m + 1.0e-9);
@@ -111,6 +115,8 @@ SpectralFeatures describe (const float* mono, int numSamples, double sampleRate)
 
     f.centroid = total > 0 ? (float) (weighted / total) : 0.0f;
     f.lowRatio = energy > 0 ? (float) (low / energy) : 0.0f;
+    f.midRatio = energy > 0 ? (float) (mid / energy) : 0.0f;
+    f.highRatio = energy > 0 ? (float) (high / energy) : 0.0f;
 
     double linMean = 0;
     for (int k = 1; k < numBins; ++k)

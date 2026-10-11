@@ -21,10 +21,87 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item -Recurse "build/DiggaKilla_artefacts/Release/VST3/Digga Killa.vst3" out/
-          Copy-Item "build/DiggaKilla_artefacts/Release/Standalone/Digga Killa.exe" out/
+          Copy-Item -Recurse "build/TrapWinSample_artefacts/Release/VST3/TrapWin Sample.vst3" out/
+          Copy-Item "build/TrapWinSample_artefacts/Release/Standalone/TrapWin Sample.exe" out/
 
       - uses: actions/upload-artifact@v5
         with:
-          name: DiggaKilla-Windows
+          name: TrapWinSample-Windows
           path: out/
+
+  macos:
+    runs-on: macos-14
+    env:
+      # Optional: with these repository secrets the build is signed with a
+      # Developer ID and notarized by Apple (see README "Mac signing").
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure (universal arm64 + x86_64)
+        run: cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect bundles
+        run: |
+          mkdir -p out
+          cp -R "build/TrapWinSample_artefacts/Release/VST3/TrapWin Sample.vst3" out/
+          cp -R "build/TrapWinSample_artefacts/Release/AU/TrapWin Sample.component" out/
+          cp -R "build/TrapWinSample_artefacts/Release/Standalone/TrapWin Sample.app" out/
+
+      - name: Sign with Developer ID
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          KEYCHAIN=build.keychain
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > cert.p12
+          security create-keychain -p ci "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN"
+          rm cert.p12
+          for bundle in out/*; do
+            codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$bundle"
+            codesign --verify --deep --strict --verbose=2 "$bundle"
+          done
+
+      - name: Notarize
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != ''
+        run: |
+          ditto -c -k --keepParent out notarize.zip
+          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          for bundle in out/*; do xcrun stapler staple "$bundle"; done
+
+      - name: Zip (keeps bundle structure and signatures)
+        run: ditto -c -k --keepParent out "TrapWin Sample Mac.zip"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: TrapWinSample-Mac
+          path: "TrapWin Sample Mac.zip"
+
+  package:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+      - name: Assemble trapwin.com folder
+        run: |
+          mkdir -p "trapwin.com/TrapWin Sample/Windows" "trapwin.com/TrapWin Sample/Mac"
+          cp -R artifacts/TrapWinSample-Windows/* "trapwin.com/TrapWin Sample/Windows/"
+          cp "artifacts/TrapWinSample-Mac/TrapWin Sample Mac.zip" "trapwin.com/TrapWin Sample/Mac/"
+          cp packaging/INSTALL.txt "trapwin.com/TrapWin Sample/"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: trapwin.com
+          path: trapwin.com/

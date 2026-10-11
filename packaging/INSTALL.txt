@@ -1,0 +1,36 @@
+TrapWin Sample  -  https://trapwin.com
+======================================
+
+Drop a song or loop on the vinyl: TrapWin Sample finds where its sections
+start (kick comes in, melody starts, drop, break) and cuts them into 8 and
+16 bar loops, plus clean one-shots (kick, 808, snare, hats, chords, notes).
+Edit any sample below, then drag it straight into your DAW as WAV or MIDI.
+
+
+WINDOWS (FL Studio, Ableton Live, Cubase, Studio One, Reaper ...)
+-----------------------------------------------------------------
+1. Close your DAW.
+2. Copy the folder "TrapWin Sample.vst3" from Windows\ to
+       C:\Program Files\Common Files\VST3\
+3. Start the DAW and rescan plugins
+   (FL Studio: Options > Manage plugins > Find installed plugins).
+4. Load "TrapWin Sample" as an instrument / generator.
+
+"TrapWin Sample.exe" runs on its own, without a DAW.
+
+
+MAC (Logic Pro, Ableton Live, FL Studio, GarageBand ...)
+--------------------------------------------------------
+1. Unzip "TrapWin Sample Mac.zip".
+2. Copy  "TrapWin Sample.component"  to  ~/Library/Audio/Plug-Ins/Components/
+   Copy  "TrapWin Sample.vst3"       to  ~/Library/Audio/Plug-Ins/VST3/
+   (Library is hidden: in Finder press Cmd+Shift+G and paste the path.)
+3. "TrapWin Sample.app" is the standalone version: drag it into Applications.
+4. Restart the DAW. Logic: the plugin is under AU Instruments > TrapWin.
+
+If macOS says the plugin "can't be checked for malicious software", this
+build is not yet notarized: right-click the app > Open, or allow it in
+System Settings > Privacy & Security.
+
+
+Support: txcjournal@gmail.com

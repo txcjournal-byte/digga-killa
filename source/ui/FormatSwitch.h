@@ -5,8 +5,7 @@
 namespace digga
 {
 
-/** "DRAG AS  [WAV|MIDI]" — chooses what dragging a row into the DAW produces.
-    Drawn like the printed x2 / /2 boxes. */
+/** "DRAG AS  [ WAV | MIDI ]" segmented pill: what dragging into the DAW produces. */
 class FormatSwitch : public juce::Component,
                      public juce::SettableTooltipClient
 {
@@ -22,6 +21,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 
 private:
+    juce::Rectangle<float> pillArea() const;
     juce::Rectangle<float> segment (bool midiSegment) const;
     bool midi = false;
 };

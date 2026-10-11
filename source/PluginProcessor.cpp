@@ -6,14 +6,11 @@ namespace digga
 
 namespace
 {
-    constexpr int stateVersion = 1;
-    const juce::Identifier stateType { "DiggaKillaState" };
+    const juce::Identifier stateType { "TrapWinSampleState" };
     const juce::Identifier samplePathProperty { "samplePath" };
-
-    juce::String percent (float value, int) { return juce::String (juce::roundToInt (value * 100.0f)) + " %"; }
 }
 
-DiggaKillaProcessor::DiggaKillaProcessor()
+TrapWinProcessor::TrapWinProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "PARAMETERS", createParameterLayout()),
       engine (jobs, clipPlayer),
@@ -23,96 +20,42 @@ DiggaKillaProcessor::DiggaKillaProcessor()
           player.setSample (std::move (s));
       })
 {
-    reverbParam = parameters.getRawParameterValue (ParamIDs::reverb);
-    delayParam = parameters.getRawParameterValue (ParamIDs::delay);
-    distortionParam = parameters.getRawParameterValue (ParamIDs::distortion);
-    filterParam = parameters.getRawParameterValue (ParamIDs::filter);
-    pitchParam = parameters.getRawParameterValue (ParamIDs::pitch);
-    mixParam = parameters.getRawParameterValue (ParamIDs::mix);
-    reverseParam = parameters.getRawParameterValue (ParamIDs::reverse);
-
-    fx.prepare (44100.0, maxBlockSize, 2);
+    volumeParam = parameters.getRawParameterValue (ParamIDs::volume);
     startTimerHz (10);
 }
 
-DiggaKillaProcessor::~DiggaKillaProcessor()
+TrapWinProcessor::~TrapWinProcessor()
 {
     stopTimer();
     jobs.cancelAll();
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout DiggaKillaProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout TrapWinProcessor::createParameterLayout()
 {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout layout;
-
-    const auto percentAttributes = AudioParameterFloatAttributes().withStringFromValueFunction (percent);
-
-    auto addPercent = [&] (const char* id, const char* name, float defaultValue)
-    {
-        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name,
-                                                           NormalisableRange<float> (0.0f, 1.0f), defaultValue,
-                                                           percentAttributes));
-    };
-
-    addPercent (ParamIDs::reverb, "Reverb", 0.0f);
-    addPercent (ParamIDs::delay, "Delay", 0.0f);
-    addPercent (ParamIDs::distortion, "Distortion", 0.0f);
-
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::filter, 1 }, "Filter", NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
-        {
-            if (std::abs (v) < 0.01f) return String ("Off");
-            return (v < 0.0f ? "LP " : "HP ") + String (roundToInt (std::abs (v) * 100.0f)) + " %";
-        })));
-
-    layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::pitch, 1 }, "Pitch", NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
-        AudioParameterFloatAttributes().withLabel ("st")));
-
-    addPercent (ParamIDs::mix, "Mix", 1.0f);
-
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::reverse, 1 }, "Reverse", false));
-
-    addPercent (ParamIDs::killStrength, "Kill Strength", 0.5f);
-
+        ParameterID { ParamIDs::volume, 1 }, "Volume", NormalisableRange<float> (-24.0f, 6.0f, 0.1f), 0.0f,
+        AudioParameterFloatAttributes().withLabel ("dB")));
     return layout;
 }
 
-dsp::FxParams DiggaKillaProcessor::getFxParams() const noexcept
+void TrapWinProcessor::prepareToPlay (double sampleRate, int)
 {
-    dsp::FxParams p;
-    p.reverb = reverbParam->load();
-    p.delay = delayParam->load();
-    p.distortion = distortionParam->load();
-    p.filter = filterParam->load();
-    p.pitch = pitchParam->load();
-    p.mix = mixParam->load();
-    const double host = hostBpm.load();
-    p.bpm = host > 0.0 ? host : fallbackBpm.load();
-    return p;
-}
-
-void DiggaKillaProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
-{
-    currentSampleRate.store (sampleRate);
-    maxBlockSize = juce::jmax (1, samplesPerBlock);
     player.prepare (sampleRate);
     clipPlayer.prepare (sampleRate);
-    fx.prepare (sampleRate, maxBlockSize, juce::jmax (1, getTotalNumOutputChannels()));
+    outputGain.reset (sampleRate, 0.05);
+    outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (volumeParam->load()));
     sampleStore.setTargetSampleRate (sampleRate);
 }
 
-void DiggaKillaProcessor::releaseResources() {}
-
-bool DiggaKillaProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool TrapWinProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto out = layouts.getMainOutputChannelSet();
     return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
 }
 
-void DiggaKillaProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void TrapWinProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
@@ -133,7 +76,7 @@ void DiggaKillaProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     hostBpm.store (transport.bpm);
 
     player.beginBlock();
-    clipPlayer.beginBlock (transport, reverseParam->load() > 0.5f);
+    clipPlayer.beginBlock (transport, false);
 
     const bool clipsSelected = clipPlayer.getSelected() >= 0;
     const int numSamples = buffer.getNumSamples();
@@ -173,24 +116,17 @@ void DiggaKillaProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
     renderUpTo (numSamples);
 
-    // effects, in chunks of the prepared block size
-    auto params = getFxParams();
-    if (transport.bpm > 0.0)
-        params.bpm = transport.bpm;
-
-    for (int start = 0; start < numSamples; start += maxBlockSize)
-    {
-        const int n = juce::jmin (maxBlockSize, numSamples - start);
-        juce::AudioBuffer<float> chunk (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), start, n);
-        fx.process (chunk, n, params);
-    }
+    outputGain.setTargetValue (juce::Decibels::decibelsToGain (volumeParam->load()));
+    if (outputGain.isSmoothing())
+        outputGain.applyGain (buffer, numSamples);
+    else
+        buffer.applyGain (outputGain.getTargetValue());
 }
 
-void DiggaKillaProcessor::timerCallback()
+void TrapWinProcessor::timerCallback()
 {
     player.collectGarbage();
     clipPlayer.collectGarbage();
-    fallbackBpm.store (engine.getProjectBpm());
 
     // follow the project tempo once it has settled for half a second
     const double bpm = hostBpm.load();
@@ -205,10 +141,10 @@ void DiggaKillaProcessor::timerCallback()
     }
 }
 
-void DiggaKillaProcessor::getStateInformation (juce::MemoryBlock& destData)
+void TrapWinProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ValueTree root (stateType);
-    root.setProperty ("version", stateVersion, nullptr);
+    root.setProperty ("version", 2, nullptr);
     root.setProperty (samplePathProperty, sampleStore.getInfo().file.getFullPathName(), nullptr);
     root.setProperty ("editorWidth", editorWidth.load(), nullptr);
     root.setProperty ("dragAsMidi", dragAsMidi.load(), nullptr);
@@ -219,7 +155,7 @@ void DiggaKillaProcessor::getStateInformation (juce::MemoryBlock& destData)
         copyXmlToBinary (*xml, destData);
 }
 
-void DiggaKillaProcessor::setStateInformation (const void* data, int sizeInBytes)
+void TrapWinProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     const auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml == nullptr)
@@ -249,14 +185,14 @@ void DiggaKillaProcessor::setStateInformation (const void* data, int sizeInBytes
     engine.setState (root.getChildWithName ("Engine"), reload);
 }
 
-juce::AudioProcessorEditor* DiggaKillaProcessor::createEditor()
+juce::AudioProcessorEditor* TrapWinProcessor::createEditor()
 {
-    return new DiggaKillaEditor (*this);
+    return new TrapWinEditor (*this);
 }
 
 } // namespace digga
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new digga::DiggaKillaProcessor();
+    return new digga::TrapWinProcessor();
 }

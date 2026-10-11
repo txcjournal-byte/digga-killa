@@ -3,7 +3,6 @@
 #include "core/Engine.h"
 #include "core/JobQueue.h"
 #include "core/SampleStore.h"
-#include "dsp/FxChain.h"
 #include "playback/ClipPlayer.h"
 #include "playback/SamplePlayer.h"
 
@@ -16,25 +15,19 @@ namespace digga
 
 namespace ParamIDs
 {
-    inline constexpr auto reverb       = "reverb";
-    inline constexpr auto delay        = "delay";
-    inline constexpr auto distortion   = "distortion";
-    inline constexpr auto filter       = "filter";
-    inline constexpr auto pitch        = "pitch";
-    inline constexpr auto mix          = "mix";
-    inline constexpr auto reverse      = "reverse";
-    inline constexpr auto killStrength = "killStrength";
+    inline constexpr auto volume = "volume";
 }
 
-class DiggaKillaProcessor : public juce::AudioProcessor,
-                            private juce::Timer
+/** TrapWin Sample: drop a song, get its loops and one-shots. */
+class TrapWinProcessor : public juce::AudioProcessor,
+                         private juce::Timer
 {
 public:
-    DiggaKillaProcessor();
-    ~DiggaKillaProcessor() override;
+    TrapWinProcessor();
+    ~TrapWinProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override;
+    void releaseResources() override {}
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using AudioProcessor::processBlock;
@@ -63,13 +56,7 @@ public:
     ClipPlayer& getClipPlayer() noexcept { return clipPlayer; }
     Engine& getEngine() noexcept { return engine; }
 
-    /** Tempo reported by the host, or 0 if the host doesn't provide one. */
     double getHostBpm() const noexcept { return hostBpm.load(); }
-    double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
-
-    /** Current FX knob values (for offline export). */
-    dsp::FxParams getFxParams() const noexcept;
-    bool isReverseOn() const noexcept { return reverseParam->load() > 0.5f; }
 
     /** Editor width the user last chose (0 = never resized); saved with the project. */
     int getEditorWidth() const noexcept { return editorWidth.load(); }
@@ -84,31 +71,22 @@ private:
     void timerCallback() override;
 
     juce::AudioProcessorValueTreeState parameters;
-    std::atomic<float>* reverbParam = nullptr;
-    std::atomic<float>* delayParam = nullptr;
-    std::atomic<float>* distortionParam = nullptr;
-    std::atomic<float>* filterParam = nullptr;
-    std::atomic<float>* pitchParam = nullptr;
-    std::atomic<float>* mixParam = nullptr;
-    std::atomic<float>* reverseParam = nullptr;
+    std::atomic<float>* volumeParam = nullptr;
+    juce::SmoothedValue<float> outputGain;
 
     SamplePlayer player;
     ClipPlayer clipPlayer;
-    dsp::FxChain fx;
     JobQueue jobs;
     Engine engine;
     SampleStore sampleStore;
 
     std::atomic<double> hostBpm { 0.0 };
-    std::atomic<double> currentSampleRate { 44100.0 };
-    std::atomic<double> fallbackBpm { 120.0 };
     std::atomic<int> editorWidth { 0 };
-    std::atomic<bool> dragAsMidi { false };   // project tempo when the host has none
-    int maxBlockSize = 512;
+    std::atomic<bool> dragAsMidi { false };
     double pendingHostBpm = 0.0;
     int hostBpmStableTicks = 0;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DiggaKillaProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrapWinProcessor)
 };
 
 } // namespace digga

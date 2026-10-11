@@ -3,7 +3,7 @@
 namespace digga
 {
 
-DiggaKillaEditor::DiggaKillaEditor (DiggaKillaProcessor& p)
+TrapWinEditor::TrapWinEditor (TrapWinProcessor& p)
     : AudioProcessorEditor (p), processor (p), view (p)
 {
     setLookAndFeel (&lookAndFeel);
@@ -22,7 +22,7 @@ DiggaKillaEditor::DiggaKillaEditor (DiggaKillaProcessor& p)
     sizeReady = true;
 }
 
-int DiggaKillaEditor::initialWidth (int savedWidth)
+int TrapWinEditor::initialWidth (int savedWidth)
 {
     constexpr double aspect = (double) MainView::logicalWidth / (double) MainView::logicalHeight;
     constexpr int minWidth = MainView::logicalWidth / 2;
@@ -34,21 +34,21 @@ int DiggaKillaEditor::initialWidth (int savedWidth)
         area = display->userArea;
 
     const int fitWidth = juce::jmin ((int) (area.getWidth() * 0.72), (int) (area.getHeight() * 0.72 * aspect));
-    const int wanted = savedWidth > 0 ? savedWidth : juce::jmin (1152, fitWidth);
+    const int wanted = savedWidth > 0 ? savedWidth : juce::jmin (1200, fitWidth);
     return juce::jlimit (minWidth, juce::jmax (minWidth, area.getWidth()), wanted);
 }
 
-DiggaKillaEditor::~DiggaKillaEditor()
+TrapWinEditor::~TrapWinEditor()
 {
     setLookAndFeel (nullptr);
 }
 
-void DiggaKillaEditor::paint (juce::Graphics& g)
+void TrapWinEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::paper);
+    g.fillAll (theme::bg);
 }
 
-void DiggaKillaEditor::resized()
+void TrapWinEditor::resized()
 {
     const float scale = (float) getWidth() / (float) MainView::logicalWidth;
     view.setTransform (juce::AffineTransform::scale (scale));

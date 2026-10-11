@@ -279,8 +279,10 @@ namespace
         Conv onset1, contour1, contour2, note1, note2, onset2;
     };
 
-    /** Mono, band-limited and resampled to 22.05 kHz. */
-    std::vector<float> toModelRate (const juce::AudioBuffer<float>& audio, double sampleRate)
+}
+
+/** Mono, band-limited and resampled to 22.05 kHz. */
+std::vector<float> toModelRate (const juce::AudioBuffer<float>& audio, double sampleRate)
     {
         const int n = audio.getNumSamples();
         std::vector<float> mono ((size_t) n, 0.0f);
@@ -315,7 +317,13 @@ namespace
         juce::LagrangeInterpolator interpolator;
         interpolator.process (ratio, mono.data(), out.data(), outLength, n, 0);
         return out;
-    }
+}
+
+double frameToSeconds (int frame)
+{
+    const int keep = framesPerWindow - overlapFrames, trim = overlapFrames / 2;
+    const int w = frame / keep, local = frame % keep + trim;
+    return juce::jmax (0.0, ((double) w * hopSamples + (double) local * fftHop - overlapSamples / 2) / modelRate);
 }
 
 void runModelWindow (const float* window, float* note, float* onset, float* contour)
@@ -493,16 +501,8 @@ std::vector<Note> decodeNotes (const Posteriors& p)
         events.emplace_back (start, end, f + midiOffset, meanFrames (start, end, f));
     }
 
-    // frame index -> seconds of the original signal
-    const int keep = framesPerWindow - overlapFrames, trim = overlapFrames / 2;
-    auto toSeconds = [&] (int frame)
-    {
-        const int w = frame / keep, local = frame % keep + trim;
-        return ((double) w * hopSamples + (double) local * fftHop - overlapSamples / 2) / modelRate;
-    };
-
     for (const auto& [start, end, pitch, amplitude] : events)
-        result.push_back ({ juce::jmax (0.0, toSeconds (start)), toSeconds (end), pitch, amplitude });
+        result.push_back ({ frameToSeconds (start), frameToSeconds (end), pitch, amplitude });
 
     std::sort (result.begin(), result.end(), [] (const Note& a, const Note& b)
     {

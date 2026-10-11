@@ -6,7 +6,7 @@ namespace digga
 FormatSwitch::FormatSwitch()
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip ("Drag rows into the DAW as audio (WAV) or as notes (MIDI)");
+    setTooltip ("Drag samples into your DAW as audio (WAV) or as notes (MIDI)");
 }
 
 void FormatSwitch::setMidi (bool shouldBeMidi)
@@ -18,48 +18,48 @@ void FormatSwitch::setMidi (bool shouldBeMidi)
     }
 }
 
+juce::Rectangle<float> FormatSwitch::pillArea() const
+{
+    return getLocalBounds().toFloat().removeFromRight (128.0f).reduced (1.0f);
+}
+
 juce::Rectangle<float> FormatSwitch::segment (bool midiSegment) const
 {
-    auto boxes = getLocalBounds().toFloat().removeFromRight (108.0f).reduced (0.75f);
-    return midiSegment ? boxes.removeFromRight (60.0f) : boxes.removeFromLeft (46.0f);
+    auto p = pillArea().reduced (3.0f);
+    return midiSegment ? p.removeFromRight (p.getWidth() * 0.5f) : p.removeFromLeft (p.getWidth() * 0.5f);
 }
 
 void FormatSwitch::paint (juce::Graphics& g)
 {
     using namespace theme;
+    theme::drawMonoLabel (g, "Drag as", getLocalBounds().toFloat().withTrimmedRight (136.0f), juce::Justification::centredRight, muted, 11.0f);
 
-    g.setFont (condensed (15.0f, true));
-    g.setColour (ink);
-    g.drawText ("DRAG AS", getLocalBounds().toFloat().withTrimmedRight (114.0f), juce::Justification::centredRight, false);
+    const auto p = pillArea();
+    g.setColour (well);
+    g.fillRoundedRectangle (p, p.getHeight() * 0.5f);
+    g.setColour (line);
+    g.drawRoundedRectangle (p, p.getHeight() * 0.5f, 1.0f);
 
     for (bool m : { false, true })
     {
-        const auto box = segment (m);
-        const bool on = m == midi;
-        if (on)
-        {
-            g.setColour (ink);
-            g.fillRect (box);
-        }
-        g.setColour (ink);
-        g.drawRect (box, 1.5f);
-        g.setColour (on ? paperLight : ink);
-        g.setFont (condensed (17.0f, true));
-        g.drawText (m ? "MIDI" : "WAV", box, juce::Justification::centred, false);
+        const auto s = segment (m);
+        if (m == midi)
+            drawChromePill (g, s, false, false);
+        g.setColour (m == midi ? well : text2);
+        g.setFont (mono (12.0f, true).withExtraKerningFactor (0.14f));
+        g.drawText (m ? "MIDI" : "WAV", s, juce::Justification::centred, false);
     }
 }
 
 void FormatSwitch::mouseDown (const juce::MouseEvent& e)
 {
     for (bool m : { false, true })
-    {
         if (segment (m).contains (e.position) && m != midi)
         {
             setMidi (m);
             if (onChange)
                 onChange (midi);
         }
-    }
 }
 
 } // namespace digga

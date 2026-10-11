@@ -6,94 +6,43 @@
 namespace digga
 {
 
-namespace
-{
-    const juce::String dash (juce::CharPointer_UTF8 (" \xe2\x80\x93 "));
-
-    std::vector<TrackRowModel> placeholderLoops()
-    {
-        std::vector<TrackRowModel> rows;
-        for (const auto* slot : { "A1", "A2", "B1", "B2" })
-        {
-            TrackRowModel row;
-            const bool isLong = slot[1] == '2';
-            row.name = juce::String (slot) + dash + "Loop " + (isLong ? "16" : "8") + " bars";
-            row.duration = "-:--";
-            rows.push_back (row);
-        }
-        return rows;
-    }
-
-    std::vector<TrackRowModel> placeholderShots()
-    {
-        std::vector<TrackRowModel> rows;
-        for (int i = 1; i <= 8; ++i)
-        {
-            TrackRowModel row;
-            row.name = "Shot " + juce::String (i);
-            row.duration = "-:--";
-            rows.push_back (row);
-        }
-        return rows;
-    }
-}
-
-MainView::MainView (DiggaKillaProcessor& p)
-    : processor (p),
-      background (theme::skinBackground()),
-      loops (TrackRow::Style::loop, 44, 38),
-      shots (TrackRow::Style::shot, 52, 40),
-      fx (p.getParameters())
+MainView::MainView (TrapWinProcessor& p) : processor (p)
 {
     setOpaque (true);
-    setWantsKeyboardFocus (true);
-
-    for (auto* c : std::initializer_list<juce::Component*> { &tempo, &tempo.doubleButton, &tempo.halveButton,
-                                                             &format, &loops, &shots, &record, &fx })
+    for (auto* c : std::initializer_list<juce::Component*> { &header, &vinyl, &list, &editor })
         addAndMakeVisible (c);
-
-    format.setMidi (processor.isDragAsMidi());
-    format.onChange = [this] (bool midi)
-    {
-        processor.setDragAsMidi (midi);
-        prefetchMidi();
-    };
 
     auto& engine = processor.getEngine();
 
-    tempo.doubleButton.onClick = [&engine]
-    {
-        if (const auto* a = engine.getAnalysis())
-            engine.setSampleBpm (a->bpm * 2.0);
-    };
-    tempo.halveButton.onClick = [&engine]
-    {
-        if (const auto* a = engine.getAnalysis())
-            engine.setSampleBpm (a->bpm * 0.5);
-    };
-    tempo.onBpmTyped = [&engine] (double bpm) { engine.setSampleBpm (bpm); };
+    header.onDouble = [&engine] { if (const auto* a = engine.getAnalysis()) engine.setSampleBpm (a->bpm * 2.0); };
+    header.onHalve = [&engine] { if (const auto* a = engine.getAnalysis()) engine.setSampleBpm (a->bpm * 0.5); };
+    header.onBpmTyped = [&engine] (double bpm) { engine.setSampleBpm (bpm); };
+    header.format.setMidi (processor.isDragAsMidi());
+    header.format.onChange = [this] (bool midi) { processor.setDragAsMidi (midi); prefetchMidi(); };
 
-    wireColumn (loops);
-    wireColumn (shots);
-
-    record.onFileChosen = [this] (const juce::File& file)
+    vinyl.onFileChosen = [this] (const juce::File& file)
     {
         processor.getEngine().newSampleChosen();
         processor.getSampleStore().loadFile (file);
     };
-    record.onPlayToggled = [this]
+    vinyl.onPlayToggled = [this]
     {
         auto& player = processor.getPlayer();
-        if (player.isPlaying())
-            player.requestStop();
-        else
-            player.requestStart();
+        if (player.isPlaying()) player.requestStop(); else player.requestStart();
     };
+
+    list.onSelect = [&engine, this] (int id) { engine.select (id); prefetchMidi(); };
+    list.onPlay = [this] (int id) { togglePreview (id); };
+    list.onDragOut = [this] (int id) { dragOut (id); };
+    list.onMenu = [this] (int id) { showRowMenu (id); };
+
+    editor.onEdit = [&engine] (int id, const EditSettings& e) { engine.setEdit (id, e); };
+    editor.onPlay = [this] (int id) { togglePreview (id); };
+    editor.onDragOut = [this] (int id) { dragOut (id); };
 
     processor.getSampleStore().addChangeListener (this);
     engine.addChangeListener (this);
-    refreshSampleStatus();
-    refreshResults();
+    refresh();
     startTimerHz (30);
 }
 
@@ -103,156 +52,94 @@ MainView::~MainView()
     processor.getEngine().removeChangeListener (this);
 }
 
-void MainView::wireColumn (TrackColumn& column)
-{
-    auto& engine = processor.getEngine();
-
-    column.onSelect = [this, &engine] (int id)
-    {
-        engine.select (id);
-        grabKeyboardFocus();
-        prefetchMidi();
-    };
-    column.onPlay = [this] (int id) { togglePreview (id); };
-    column.onKill = [this, &engine] (int id)
-    {
-        engine.select (id);
-        const auto strength = processor.getParameters().getRawParameterValue (ParamIDs::killStrength)->load();
-        engine.kill (id, strength);
-    };
-    column.onToggle = [&engine] (int id)
-    {
-        if (const auto* node = engine.getTree().find (id))
-            engine.setExpanded (id, ! node->expanded);
-    };
-    column.onMenu = [this] (int id) { showRowMenu (id); };
-    column.onDragOut = [this] (int id) { dragOut (id); };
-}
-
 void MainView::paint (juce::Graphics& g)
 {
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (background, getLocalBounds().toFloat());
+    using namespace theme;
+    g.fillAll (bg);
+
+    // faint blue haze behind the header like the web hero
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0x224676c4), (float) getWidth() * 0.5f, -120.0f,
+                                             juce::Colour (0x004676c4), (float) getWidth() * 0.5f, 260.0f, true));
+    g.fillRect (getLocalBounds());
+
+    drawCard (g, vinyl.getBounds().toFloat());
 }
 
-// All positions are design pixels measured on docs/design.png.
 void MainView::resized()
 {
-    tempo.setBounds (TempoDisplay::textBounds);
-    tempo.doubleButton.setBounds (1250, 47, 36, 28);
-    tempo.halveButton.setBounds (1287, 47, 36, 28);
-    format.setBounds (1150, 84, 173, 28);
-    loops.setBounds (28, 263, 500, 424);
-    shots.setBounds (978, 262, 340, 424);
-    record.setBounds (525, 226, 428, 428);
-    fx.setBounds (FxPanel::designBounds);
-}
-
-bool MainView::keyPressed (const juce::KeyPress& key)
-{
-    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))
-    {
-        processor.getEngine().undo();
-        return true;
-    }
-    return false;
+    header.setBounds (0, 0, logicalWidth, 92);
+    vinyl.setBounds (24, 100, 400, 372);
+    list.setBounds (440, 100, 816, 372);
+    editor.setBounds (24, 488, 1232, 290);
 }
 
 void MainView::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    refreshSampleStatus();
-    refreshResults();
+    refresh();
 }
 
-void MainView::refreshSampleStatus()
+void MainView::refresh()
 {
     const auto& store = processor.getSampleStore();
     const auto& engine = processor.getEngine();
 
     auto status = store.getStatus();
-    auto info = store.getInfo();
     juce::String detail;
-
-    if (status == SampleStore::Status::ready)
+    if (status == SampleStore::Status::ready && engine.getPhase() != Engine::Phase::ready)
     {
-        switch (engine.getPhase())
-        {
-            case Engine::Phase::empty:
-            case Engine::Phase::analysing:  status = SampleStore::Status::loading; detail = "FINDING TEMPO & KEY"; break;
-            case Engine::Phase::generating: status = SampleStore::Status::loading; detail = "CUTTING LOOPS & SHOTS"; break;
-            case Engine::Phase::ready:      break;
-        }
+        status = SampleStore::Status::loading;
+        detail = engine.getStatusDetail();
     }
-
-    record.setStatus (status, info, detail);
+    vinyl.setStatus (status, store.getInfo(), detail);
 
     if (const auto* a = engine.getAnalysis())
-        tempo.setSample (a->bpm, a->keyName);
+        header.setSample (a->bpm, a->keyName);
     else
-        tempo.setSample (0.0, {});
-
-    const bool canFix = engine.getAnalysis() != nullptr && engine.getPhase() == Engine::Phase::ready;
-    tempo.doubleButton.setEnabled (canFix);
-    tempo.halveButton.setEnabled (canFix);
-}
-
-void MainView::refreshResults()
-{
-    const auto& engine = processor.getEngine();
-    const auto& tree = engine.getTree();
-
-    if (tree.isEmpty())
-    {
-        loops.setRows (placeholderLoops());
-        shots.setRows (placeholderShots());
-        return;
-    }
+        header.setSample (0.0, {});
+    header.setTempoFixEnabled (engine.getAnalysis() != nullptr && engine.getPhase() == Engine::Phase::ready);
 
     const double rate = engine.getSampleRate();
-
-    auto build = [&] (ClipKind kind)
+    std::vector<RowModel> loops, shots;
+    for (const auto& item : engine.getItems())
     {
-        std::vector<TrackRowModel> models;
-        for (const auto& row : tree.visibleRows (kind))
-        {
-            TrackRowModel m;
-            m.id = row.node->id;
-            m.name = row.node->displayName();
-            m.duration = audio::formatDuration (row.node->lengthSeconds (rate));
-            m.depth = row.depth;
-            m.lastSibling = row.lastSibling;
-            m.placeholder = false;
-            m.hasChildren = row.hasChildren;
-            m.expanded = row.node->expanded;
-            m.busy = engine.isBusy (m.id);
-            m.peaks = row.node->peaks;
-            models.push_back (std::move (m));
-        }
-        return models;
-    };
+        RowModel m;
+        m.id = item.id;
+        m.name = item.name;
+        m.detail = item.detail (rate);
+        m.length = audio::formatDuration (item.lengthSeconds (rate));
+        m.peaks = item.peaks;
+        m.edited = ! item.edit.isDefault();
+        (item.kind == ClipKind::loop ? loops : shots).push_back (std::move (m));
+    }
 
-    loops.setRows (build (ClipKind::loop));
-    shots.setRows (build (ClipKind::shot));
-    loops.setSelectedId (engine.getSelected());
-    shots.setSelectedId (engine.getSelected());
+    list.setPlaceholder (status == SampleStore::Status::loading ? "Digging through the song..." : "Drop a song on the vinyl");
+    list.setRows (std::move (loops), std::move (shots));
+    list.setSelectedId (engine.getSelected());
+    if (engine.getSelected() != shownSelection)
+    {
+        list.showTabFor (engine.getSelected());
+        shownSelection = engine.getSelected();
+    }
+
+    editor.setItem (engine.find (engine.getSelected()), rate, engine.getProjectBpm());
 }
 
 void MainView::timerCallback()
 {
     const auto& player = processor.getPlayer();
-    record.setPlayback (player.isPlaying(), player.getProgress());
-    tempo.setProjectBpm (processor.getEngine().getProjectBpm());
+    vinyl.setPlayback (player.isPlaying(), player.getProgress());
+    header.setProjectBpm (processor.getEngine().getProjectBpm());
 
-    const int previewing = processor.getClipPlayer().getPreviewId();
-    loops.setPlayingId (previewing);
-    shots.setPlayingId (previewing);
+    const auto& clips = processor.getClipPlayer();
+    const int previewing = clips.getPreviewId();
+    list.setPlayingId (previewing);
+    editor.setPlayback (previewing >= 0 && previewing == processor.getEngine().getSelected(), clips.getPreviewProgress());
 }
 
 void MainView::togglePreview (int id)
 {
     auto& clips = processor.getClipPlayer();
     processor.getEngine().select (id);
-
     if (clips.getPreviewId() == id)
         clips.stopPreview();
     else
@@ -261,88 +148,59 @@ void MainView::togglePreview (int id)
 
 void MainView::showRowMenu (int id)
 {
-    auto& engine = processor.getEngine();
-    const auto* node = engine.getTree().find (id);
-    if (node == nullptr)
+    const auto* item = processor.getEngine().find (id);
+    if (item == nullptr)
         return;
 
-    const bool hasChildren = ! engine.getTree().childrenOf (id).empty();
-
     juce::PopupMenu menu;
-    menu.addItem (1, "KILL again (new 6 variations)");
-    if (hasChildren)
-        menu.addItem (2, node->expanded ? "Collapse variations" : "Expand variations");
-    menu.addItem (3, "Undo last KILL", engine.canUndo());
-    if (! node->isRoot())
-    {
-        menu.addSeparator();
-        menu.addItem (4, "Copy seed " + juce::String ((juce::int64) node->seed));
-    }
-
+    menu.addItem (1, "Play / stop");
+    menu.addItem (2, "Reset edits", ! item->edit.isDefault());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ juce::Desktop::getMousePosition(), juce::Desktop::getMousePosition() }),
-                        [safe = juce::Component::SafePointer<MainView> (this), id, seed = node->seed] (int result)
+                        [safe = juce::Component::SafePointer<MainView> (this), id] (int result)
     {
         if (safe == nullptr)
             return;
-        auto& e = safe->processor.getEngine();
-        switch (result)
-        {
-            case 1: e.kill (id, safe->processor.getParameters().getRawParameterValue (ParamIDs::killStrength)->load()); break;
-            case 2: if (const auto* n = e.getTree().find (id)) e.setExpanded (id, ! n->expanded); break;
-            case 3: e.undo(); break;
-            case 4: juce::SystemClipboard::copyTextToClipboard (juce::String ((juce::int64) seed)); break;
-            default: break;
-        }
+        if (result == 1)
+            safe->togglePreview (id);
+        else if (result == 2)
+            safe->processor.getEngine().setEdit (id, {});
     });
 }
 
 void MainView::prefetchMidi()
 {
-    // transcribing takes a moment: start on the selected row before it is dragged
     if (! processor.isDragAsMidi())
         return;
     const auto& engine = processor.getEngine();
-    if (const auto* node = engine.getTree().find (engine.getSelected()))
-        transcriptions.prefetch (node->audio, engine.getSampleRate());
+    if (const auto* item = engine.find (engine.getSelected()))
+        transcriptions.prefetch (item->edited, engine.getSampleRate());
 }
 
 void MainView::dragOut (int id)
 {
     auto& engine = processor.getEngine();
-    const auto* node = engine.getTree().find (id);
-    if (node == nullptr || node->audio == nullptr)
+    const auto* item = engine.find (id);
+    if (item == nullptr || item->edited == nullptr)
         return;
 
     const auto* a = engine.getAnalysis();
-    const auto fileName = exporter::makeFileName (node->fileTag(), engine.getProjectBpm(), a != nullptr ? a->keyName : juce::String());
+    const double bpm = engine.getProjectBpm();
+    const auto fileName = exporter::makeFileName (item->fileTag(), bpm, a != nullptr ? a->keyName : juce::String());
     juce::File file;
 
     juce::MouseCursor::showWaitCursor();
-
     if (processor.isDragAsMidi())
     {
         midi::ExportOptions options;
-        options.bpm = engine.getProjectBpm();
-        options.lengthSeconds = node->lengthSeconds (engine.getSampleRate());
-        options.transpose = juce::roundToInt (processor.getFxParams().pitch);
-        options.reverse = processor.isReverseOn();
-
-        if (const auto notes = transcriptions.get (node->audio, engine.getSampleRate()))
+        options.bpm = bpm;
+        options.lengthSeconds = item->lengthSeconds (engine.getSampleRate());
+        if (const auto notes = transcriptions.get (item->edited, engine.getSampleRate()))
             file = midi::writeToTempFile (*notes, options, fileName);
     }
     else
     {
-        exporter::Request request;
-        request.audio = node->audio;
-        request.isLoop = node->kind == ClipKind::loop;
-        request.reverse = processor.isReverseOn();
-        request.fx = processor.getFxParams();
-        request.fx.bpm = engine.getProjectBpm();
-        request.sampleRate = engine.getSampleRate();
-        request.fileName = fileName;
-        file = exporter::renderToTempFile (request);
+        file = exporter::writeWav (*item->edited, engine.getSampleRate(), fileName);
     }
-
     juce::MouseCursor::hideWaitCursor();
 
     if (file.existsAsFile())

@@ -292,32 +292,93 @@ namespace
     }
 }
 
-std::vector<GeneratedLoop> generate (const juce::AudioBuffer<float>& source, double sampleRate,
-                                     const analysis::Analysis& analysis, double projectBpm)
+std::vector<GeneratedLoop> generateSectionLoops (const juce::AudioBuffer<float>& source, double sampleRate,
+                                                 const analysis::Analysis& analysis,
+                                                 const analysis::Structure& structure, double projectBpm)
 {
     std::vector<GeneratedLoop> loops;
     if (source.getNumSamples() == 0 || analysis.bpm <= 0.0 || projectBpm <= 0.0)
         return loops;
 
     const Planner planner (source, sampleRate, analysis);
+    const int numBars = planner.numBars();
+    constexpr size_t maxLoops = 24;
 
-    const auto a1 = planner.best (8, {}, 0.0f);
-    const auto a2 = planner.best (16, a1.bars, 0.15f);
-    std::vector<int> used (a1.bars);
-    used.insert (used.end(), a2.bars.begin(), a2.bars.end());
-    const auto b1 = planner.best (8, used, 0.5f);
-    used.insert (used.end(), b1.bars.begin(), b1.bars.end());
-    const auto b2 = planner.best (16, used, 0.35f);
+    struct Plan { juce::String name; int start; int bars; };
+    std::vector<Plan> plans;
 
-    const std::pair<const char*, const Candidate*> plan[] = { { "A1", &a1 }, { "A2", &a2 }, { "B1", &b1 }, { "B2", &b2 } };
-
-    for (const auto& [slot, candidate] : plan)
+    // does this stretch of bars sound like a loop we already have (repeated chorus)?
+    auto isRepeat = [&] (int start, int bars)
     {
+        for (const auto& p : plans)
+        {
+            if (p.bars != bars)
+                continue;
+            float sim = 0.0f;
+            for (int i = 0; i < bars; ++i)
+                sim += planner.similarity (p.start + i, start + i);
+            if (sim / (float) bars > 0.985f)
+                return true;
+        }
+        return false;
+    };
+
+    for (const auto& section : structure.sections)
+    {
+        int bar = section.startBar;
+        const int end = section.startBar + section.numBars;
+        bool first = true;
+
+        while (plans.size() < maxLoops)
+        {
+            const int left = end - bar;
+            int length = left >= 16 ? 16 : 8;
+            if (! first && left < 8)
+                break;                      // the tail of a section: covered by the next start
+            if (bar + length > numBars)
+                length = 8;
+            if (bar + length > numBars)
+                break;
+
+            if (! isRepeat (bar, length))
+                plans.push_back ({ section.name, bar, length });
+
+            first = false;
+            bar += length;
+            if (bar >= end)
+                break;
+        }
+    }
+
+    // short material (a loop, not a song): fall back to the best-sounding phrase
+    if (plans.empty())
+    {
+        for (int length : { 8, 16 })
+        {
+            const auto best = planner.best (length, {}, 0.0f);
+            GeneratedLoop loop;
+            loop.name = "Loop";
+            loop.bars = length;
+            loop.startBar = best.bars.empty() ? 0 : best.bars.front();
+            loop.sourceSeconds = analysis.downbeatSeconds + loop.startBar * analysis.barSeconds();
+            loop.audio = render (planner, best.bars, length, sampleRate, analysis.bpm, projectBpm);
+            loops.push_back (std::move (loop));
+        }
+        return loops;
+    }
+
+    for (const auto& p : plans)
+    {
+        std::vector<int> seq;
+        for (int i = 0; i < p.bars; ++i)
+            seq.push_back (p.start + i);
+
         GeneratedLoop loop;
-        loop.slot = slot;
-        loop.bars = (int) candidate->bars.size();
-        loop.sourceBars = candidate->bars;
-        loop.audio = render (planner, candidate->bars, loop.bars, sampleRate, analysis.bpm, projectBpm);
+        loop.name = p.name;
+        loop.bars = p.bars;
+        loop.startBar = p.start;
+        loop.sourceSeconds = analysis.downbeatSeconds + p.start * analysis.barSeconds();
+        loop.audio = render (planner, seq, p.bars, sampleRate, analysis.bpm, projectBpm);
         loops.push_back (std::move (loop));
     }
 

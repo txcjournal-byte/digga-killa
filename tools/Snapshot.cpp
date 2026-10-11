@@ -1,8 +1,8 @@
-// Headless end-to-end check of the plugin: renders the editor to PNG and
-// drives the whole chain (load -> analysis -> loops/shots -> KILL -> preview
-// -> MIDI -> export -> state restore).
+// Headless end-to-end check of TrapWin Sample: renders the editor to PNG and
+// drives the whole chain (load -> analysis -> section loops / one-shots ->
+// editor -> preview -> MIDI -> drag export -> state restore -> tempo fix).
 //
-// Usage: DiggaKillaSnapshot <outDir> [sample]
+// Usage: TrapWinTest <outDir> [song] [analyse]
 #include "PluginProcessor.h"
 #include "export/Exporter.h"
 #include "midi/BasicPitch.h"
@@ -52,22 +52,6 @@ namespace
         return false;
     }
 
-    int idOf (DiggaKillaProcessor& p, const juce::String& key)
-    {
-        return query<int> ([&] { const auto* n = p.getEngine().getTree().findByKey (key); return n != nullptr ? n->id : -1; });
-    }
-
-    bool idle (DiggaKillaProcessor& p)
-    {
-        auto& e = p.getEngine();
-        if (e.getPhase() != Engine::Phase::ready)
-            return false;
-        for (const auto& n : e.getTree().all())
-            if (e.isBusy (n.id))
-                return false;
-        return true;
-    }
-
     float runBlocks (juce::AudioProcessor& processor, int blocks, juce::MidiBuffer firstMidi = {})
     {
         juce::AudioBuffer<float> buffer (2, 512);
@@ -90,6 +74,8 @@ namespace
         if (! ok)
             ++failures;
     }
+
+    bool ready (TrapWinProcessor& p) { return p.getEngine().getPhase() == Engine::Phase::ready && ! p.getEngine().getItems().empty(); }
 }
 
 /** bpwindow <in.f32> <out.f32>: raw model on one 43844-sample window.
@@ -141,14 +127,14 @@ int main (int argc, char** argv)
     outDir.createDirectory();
 
     std::unique_ptr<juce::AudioProcessor> base (createPluginFilter());
-    auto& processor = static_cast<DiggaKillaProcessor&> (*base);
+    auto& processor = static_cast<TrapWinProcessor&> (*base);
     processor.setPlayConfigDetails (0, 2, 48000.0, 512);
     processor.prepareToPlay (48000.0, 512);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditorIfNeeded());
 
     std::thread script ([&]
     {
-        onMessageThread ([&] { editor->setSize (1344, 896); });
+        onMessageThread ([&] { editor->setSize (1280, 800); });
         wait (300);
         onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_empty.png")); });
 
@@ -159,172 +145,110 @@ int main (int argc, char** argv)
 
             std::printf ("\nLOAD + ANALYSE + GENERATE\n");
             onMessageThread ([&] { engine.newSampleChosen(); processor.getSampleStore().loadFile (sample); });
-            check (waitUntil ([&] { return idle (processor) && ! engine.getTree().isEmpty(); }, 180000), "results generated");
+            wait (400);
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_busy.png")); });
+            check (waitUntil ([&] { return ready (processor); }, 300000), "results generated");
             std::printf ("  took %.1f s\n", (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0);
 
             onMessageThread ([&]
             {
                 if (const auto* a = engine.getAnalysis())
-                    std::printf ("  tempo %.2f BPM (detected %.2f), key %s, first bar at %.3f s\n",
-                                 a->bpm, a->detectedBpm, a->keyName.toRawUTF8(), a->downbeatSeconds);
-                for (const auto& n : engine.getTree().all())
-                    std::printf ("  %-22s %6.2f s  peak %.2f\n", n.displayName().toRawUTF8(),
-                                 n.lengthSeconds (engine.getSampleRate()), audio::peak (*n.audio));
+                    std::printf ("  tempo %.2f BPM, key %s, first bar at %.3f s\n", a->bpm, a->keyName.toRawUTF8(), a->downbeatSeconds);
+                for (const auto& item : engine.getItems())
+                    std::printf ("  %-5s %-14s %-30s %6.2f s\n", item.key.toRawUTF8(), item.name.toRawUTF8(),
+                                 item.detail (engine.getSampleRate()).toRawUTF8(), item.lengthSeconds (engine.getSampleRate()));
             });
-            wait (400);
-            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); });
-
             if (argc > 3 && juce::String (argv[3]) == "analyse")
             {
-                onMessageThread ([&] { editor = nullptr; juce::MessageManager::getInstance()->stopDispatchLoop(); });
+                wait (300);
+                onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); editor = nullptr; juce::MessageManager::getInstance()->stopDispatchLoop(); });
                 return;
             }
 
-            std::printf ("\nKILL\n");
-            const float strengths[] = { 0.6f, 1.0f, 0.3f };
-            const char* keys[] = { "A2:", "A2:3", "S1:" };
-            for (int i = 0; i < 3; ++i)
-            {
-                const int id = idOf (processor, keys[i]);
-                start = juce::Time::getMillisecondCounterHiRes();
-                onMessageThread ([&] { engine.kill (id, strengths[i]); });
-                wait (100);
-                const bool done = waitUntil ([&] { return idle (processor) && engine.getTree().childrenOf (id).size() == 6; }, 120000);
-                std::printf ("  KILL %s (strength %.1f): %.1f s\n", keys[i], strengths[i],
-                             (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0);
-                check (done, "6 variations created");
-            }
+            const int firstLoop = query<int> ([&] { for (const auto& i : engine.getItems()) if (i.kind == ClipKind::loop) return i.id; return -1; });
+            const int firstShot = query<int> ([&] { for (const auto& i : engine.getItems()) if (i.kind == ClipKind::shot) return i.id; return -1; });
+            check (firstLoop >= 0 && firstShot >= 0, "found loops and one-shots");
 
-            check (query<bool> ([&]
-            {
-                const auto* original = engine.getTree().findByKey ("A2:");
-                const auto* variation = engine.getTree().findByKey ("A2:3.2");
-                return original != nullptr && variation != nullptr
-                    && original->audio->getNumSamples() == variation->audio->getNumSamples();
-            }), "loop variations keep the exact loop length");
-
-            wait (300);
-            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_killed.png")); });
-
-            std::printf ("\nPLAYBACK\n");
-            const int a1 = idOf (processor, "A1:");
-            onMessageThread ([&] { processor.getClipPlayer().preview (a1); });
-            check (runBlocks (processor, 40) > 0.05f, "row preview plays");
-            onMessageThread ([&] { processor.getClipPlayer().stopPreview(); });
-            runBlocks (processor, 10);
-
-            const int s1 = idOf (processor, "S1:");
-            onMessageThread ([&] { engine.select (s1); });
-            juce::MidiBuffer midi;
-            midi.addEvent (juce::MidiMessage::noteOn (1, 67, (juce::uint8) 110), 0);
-            check (runBlocks (processor, 20, midi) > 0.05f, "MIDI note plays selected one-shot (chromatic)");
-
-            onMessageThread ([&] { engine.select (a1); });
-            midi.clear();
-            midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
-            check (runBlocks (processor, 20, midi) > 0.05f, "MIDI note starts selected loop");
-            midi.clear();
-            midi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
-            runBlocks (processor, 10, midi);
-
-            std::printf ("\nEXPORT\n");
+            std::printf ("\nEDITOR\n");
+            const int originalLength = query<int> ([&] { return engine.find (firstLoop)->original->getNumSamples(); });
             onMessageThread ([&]
             {
-                const auto* node = engine.getTree().findByKey ("A2:3.2");
-                exporter::Request request;
-                request.audio = node->audio;
-                request.isLoop = true;
-                request.fx.reverb = 0.35f;
-                request.fx.delay = 0.2f;
-                request.fx.pitch = 0.0f;
-                request.fx.bpm = engine.getProjectBpm();
-                request.sampleRate = engine.getSampleRate();
-                request.fileName = exporter::makeFileName (node->fileTag(), engine.getProjectBpm(), engine.getAnalysis()->keyName);
-                const auto file = exporter::renderToTempFile (request);
-                std::printf ("  %s (%lld bytes)\n", file.getFullPathName().toRawUTF8(), (long long) file.getSize());
-                check (file.existsAsFile() && file.getFileName().startsWith ("DiggaKilla_A2_KillMix3-2_"), "WAV rendered with tempo + key in the name");
+                EditSettings e;
+                e.start = 0.25; e.end = 0.75; e.fadeOutMs = 200.0f; e.pitch = 2.0f; e.gainDb = -3.0f;
+                engine.select (firstLoop);
+                engine.setEdit (firstLoop, e);
+            });
+            check (waitUntil ([&] { return engine.find (firstLoop)->edited->getNumSamples() != originalLength; }, 60000),
+                   "edit renders (crop + pitch + fade + gain)");
+            check (query<bool> ([&] { return std::abs (engine.find (firstLoop)->edited->getNumSamples() - originalLength / 2) < 4; }),
+                   "crop keeps exactly the chosen half");
+            wait (300);
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); });
 
-                juce::AudioFormatManager formats;
-                formats.registerBasicFormats();
-                std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
-                check (reader != nullptr && reader->lengthInSamples == node->audio->getNumSamples(), "exported loop is exactly loop-long");
+            std::printf ("\nPLAYBACK\n");
+            onMessageThread ([&] { processor.getClipPlayer().preview (firstLoop); });
+            check (runBlocks (processor, 40) > 0.02f, "preview plays the edited loop");
+            onMessageThread ([&] { processor.getClipPlayer().stopPreview(); });
+            runBlocks (processor, 10);
+            onMessageThread ([&] { engine.select (firstShot); });
+            wait (300);
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_shots.png")); });
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 110), 0);
+            check (runBlocks (processor, 20, midi) > 0.02f, "piano roll plays the selected one-shot");
 
-                request.fx.pitch = 5.0f;
-                request.isLoop = false;
-                check (exporter::render (request).getNumSamples() > 0, "pitched export renders");
+            std::printf ("\nDRAG EXPORT\n");
+            onMessageThread ([&]
+            {
+                const auto* item = engine.find (firstLoop);
+                const auto name = exporter::makeFileName (item->fileTag(), engine.getProjectBpm(), engine.getAnalysis()->keyName);
+                const auto wav = exporter::writeWav (*item->edited, engine.getSampleRate(), name);
+                std::printf ("  %s (%lld bytes)\n", wav.getFileName().toRawUTF8(), (long long) wav.getSize());
+                check (wav.existsAsFile() && wav.getFileName().startsWith ("TrapWin_"), "WAV written");
 
-                // MIDI drag: transcribe the loop and write a .mid
-                const auto midiStart = juce::Time::getMillisecondCounterHiRes();
-                const auto notes = midi::transcribe (*node->audio, engine.getSampleRate());
+                const auto notes = midi::transcribe (*item->edited, engine.getSampleRate());
                 midi::ExportOptions options;
                 options.bpm = engine.getProjectBpm();
-                options.lengthSeconds = node->lengthSeconds (engine.getSampleRate());
-                const auto midiFile = midi::writeToTempFile (notes, options, request.fileName);
-                std::printf ("  MIDI: %d notes in %.2f s -> %s\n", (int) notes.size(),
-                             (juce::Time::getMillisecondCounterHiRes() - midiStart) / 1000.0, midiFile.getFileName().toRawUTF8());
-
-                juce::MidiFile readBack;
-                juce::FileInputStream in (midiFile);
-                int noteOns = 0;
-                if (in.openedOk() && readBack.readFrom (in))
-                    for (int t = 0; t < readBack.getNumTracks(); ++t)
-                        for (const auto* e : *readBack.getTrack (t))
-                            noteOns += e->message.isNoteOn() ? 1 : 0;
-                check (noteOns > 0 && noteOns <= (int) notes.size(), "MIDI file has the transcribed notes");
+                options.lengthSeconds = item->lengthSeconds (engine.getSampleRate());
+                const auto mid = midi::writeToTempFile (notes, options, name);
+                std::printf ("  %s: %d notes\n", mid.getFileName().toRawUTF8(), (int) notes.size());
+                check (mid.existsAsFile() && ! notes.empty(), "MIDI written");
             });
 
-            std::printf ("\nSTATE SAVE / RESTORE\n");
+            std::printf ("\nSTATE\n");
             juce::MemoryBlock state;
             processor.getStateInformation (state);
-            std::printf ("  state %d bytes\n", (int) state.getSize());
-
             std::unique_ptr<juce::AudioProcessor> base2 (createPluginFilter());
-            auto& restored = static_cast<DiggaKillaProcessor&> (*base2);
+            auto& restored = static_cast<TrapWinProcessor&> (*base2);
             restored.setPlayConfigDetails (0, 2, 48000.0, 512);
             restored.prepareToPlay (48000.0, 512);
             restored.setStateInformation (state.getData(), (int) state.getSize());
-
-            const auto expected = query<int> ([&] { return (int) engine.getTree().all().size(); });
-            const bool same = waitUntil ([&]
+            const auto expected = query<int> ([&] { return (int) engine.getItems().size(); });
+            check (waitUntil ([&] { return ready (restored) && (int) restored.getEngine().getItems().size() == expected; }, 300000),
+                   "restored project has the same samples");
+            check (waitUntil ([&]
             {
-                return idle (restored) && (int) restored.getEngine().getTree().all().size() == expected;
-            }, 240000);
-            check (same, "restored tree has every variation");
-
-            check (query<bool> ([&]
-            {
-                const auto* x = engine.getTree().findByKey ("A2:3.2");
-                const auto* y = restored.getEngine().getTree().findByKey ("A2:3.2");
-                if (x == nullptr || y == nullptr || x->audio->getNumSamples() != y->audio->getNumSamples())
-                    return false;
-                float diff = 0.0f;
-                for (int ch = 0; ch < x->audio->getNumChannels(); ++ch)
-                    for (int i = 0; i < x->audio->getNumSamples(); ++i)
-                        diff = juce::jmax (diff, std::abs (x->audio->getSample (ch, i) - y->audio->getSample (ch, i)));
-                std::printf ("  max sample difference A2:3.2 = %g\n", (double) diff);
-                return diff < 1.0e-4f;
-            }), "seeds reproduce the same audio");
-
+                const auto& items = restored.getEngine().getItems();
+                for (const auto& i : items)
+                    if (i.key == engine.find (firstLoop)->key)
+                        return i.edited->getNumSamples() == engine.find (firstLoop)->edited->getNumSamples();
+                return false;
+            }, 60000), "editor settings restored");
             onMessageThread ([&] { base2 = nullptr; });
 
-            std::printf ("\nUNDO / TEMPO\n");
-            onMessageThread ([&] { engine.undo(); });
-            check (query<bool> ([&] { return engine.getTree().childrenOf (idOf (processor, "S1:")).empty(); }), "undo removes the last KILL");
-
-            onMessageThread ([&] { engine.setSampleBpm (engine.getAnalysis()->bpm * 2.0); });
-            wait (100);
-            check (waitUntil ([&] { return idle (processor) && engine.getTree().findByKey ("A2:3.2") != nullptr; }, 240000),
-                   "x2 regenerates and replays the KILL tree");
-            onMessageThread ([&] { std::printf ("  tempo now %.1f BPM\n", engine.getAnalysis()->bpm); });
+            std::printf ("\nTEMPO\n");
             onMessageThread ([&] { engine.setSampleBpm (engine.getAnalysis()->bpm * 0.5); });
             wait (100);
-            waitUntil ([&] { return idle (processor); }, 240000);
+            check (waitUntil ([&] { return ready (processor); }, 300000), "half tempo regenerates");
+            onMessageThread ([&] { std::printf ("  tempo now %.1f BPM, %d loops\n", engine.getAnalysis()->bpm, (int) engine.getItems().size()); });
+            onMessageThread ([&] { engine.setSampleBpm (engine.getAnalysis()->bpm * 2.0); });
+            wait (100);
+            waitUntil ([&] { return ready (processor); }, 300000);
         }
 
-        onMessageThread ([&] { editor->setSize (672, 448); });
+        onMessageThread ([&] { editor->setSize (800, 500); });
         wait (200);
         onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_small.png")); });
-
         onMessageThread ([&] { editor = nullptr; juce::MessageManager::getInstance()->stopDispatchLoop(); });
     });
 

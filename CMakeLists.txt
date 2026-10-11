@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(DiggaKilla VERSION 0.1.0 LANGUAGES C CXX)
+project(TrapWinSample VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,12 +9,12 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 # ------------------------------------------------------------------------------
 # JUCE
 #   - default: fetched from GitHub at a pinned tag
-#   - offline / faster: cmake -DDIGGA_JUCE_PATH=/path/to/JUCE ..
+#   - offline / faster: cmake -DTRAPWIN_JUCE_PATH=/path/to/JUCE ..
 # ------------------------------------------------------------------------------
-set(DIGGA_JUCE_PATH "" CACHE PATH "Path to a local JUCE checkout (optional)")
+set(TRAPWIN_JUCE_PATH "" CACHE PATH "Path to a local JUCE checkout (optional)")
 
-if(DIGGA_JUCE_PATH)
-    add_subdirectory(${DIGGA_JUCE_PATH} ${CMAKE_BINARY_DIR}/JUCE EXCLUDE_FROM_ALL)
+if(TRAPWIN_JUCE_PATH)
+    add_subdirectory(${TRAPWIN_JUCE_PATH} ${CMAKE_BINARY_DIR}/JUCE EXCLUDE_FROM_ALL)
 else()
     include(FetchContent)
     FetchContent_Declare(JUCE
@@ -27,70 +27,69 @@ endif()
 # ------------------------------------------------------------------------------
 # Plugin
 # ------------------------------------------------------------------------------
-juce_add_plugin(DiggaKilla
-    PRODUCT_NAME                "Digga Killa"
-    COMPANY_NAME                "TrapVST"
-    BUNDLE_ID                   com.trapvst.diggakilla
-    PLUGIN_MANUFACTURER_CODE    Trvs
-    PLUGIN_CODE                 Dgkl
+juce_add_plugin(TrapWinSample
+    PRODUCT_NAME                "TrapWin Sample"
+    COMPANY_NAME                "TrapWin"
+    COMPANY_WEBSITE             "https://trapwin.com"
+    COMPANY_EMAIL               "txcjournal@gmail.com"
+    BUNDLE_ID                   com.trapwin.sample
+    PLUGIN_MANUFACTURER_CODE    Trwn
+    PLUGIN_CODE                 Twsp
     IS_SYNTH                    TRUE
     NEEDS_MIDI_INPUT            TRUE
     NEEDS_MIDI_OUTPUT           FALSE
     IS_MIDI_EFFECT              FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD     FALSE
+    HARDENED_RUNTIME_ENABLED    TRUE
     VST3_CATEGORIES             Instrument Sampler
-    FORMATS                     VST3 Standalone)
+    AU_MAIN_TYPE                kAudioUnitType_MusicDevice
+    FORMATS                     VST3 AU Standalone)
 
-juce_add_binary_data(DiggaKillaAssets
+juce_add_binary_data(TrapWinAssets
     SOURCES
-        assets/fonts/ArchivoBlack-Regular.ttf
-        assets/fonts/BarlowCondensed-SemiBold.ttf
-        assets/fonts/BarlowCondensed-Bold.ttf
-        assets/fonts/CourierPrime-Regular.ttf
-        assets/fonts/CourierPrime-Bold.ttf
-        assets/skin/background.png
-        assets/skin/drop_sample.png
-        assets/skin/kill_stamp.png
+        assets/fonts/ArchivoDisplay-BlackItalic.ttf
+        assets/fonts/Archivo-ExtraBold.ttf
+        assets/fonts/Archivo-SemiBold.ttf
+        assets/fonts/IBMPlexMono-Medium.ttf
+        assets/fonts/IBMPlexMono-SemiBold.ttf
         assets/models/basic_pitch.bin)
 
-target_sources(DiggaKilla PRIVATE
+target_sources(TrapWinSample PRIVATE
     source/PluginProcessor.cpp
     source/PluginEditor.cpp
     source/core/AudioTools.cpp
+    source/core/Edit.cpp
     source/core/Engine.cpp
     source/core/JobQueue.cpp
-    source/core/ResultTree.cpp
     source/core/SampleStore.cpp
     source/analysis/Features.cpp
     source/analysis/Analyzer.cpp
+    source/analysis/Structure.cpp
     source/loops/LoopGenerator.cpp
     source/oneshots/OneShotExtractor.cpp
-    source/kill/KillEngine.cpp
     source/dsp/Stretcher.cpp
-    source/dsp/FxChain.cpp
     source/export/Exporter.cpp
     source/midi/BasicPitch.cpp
     source/midi/MidiExport.cpp
     source/playback/SamplePlayer.cpp
     source/playback/ClipPlayer.cpp
     source/ui/Theme.cpp
-    source/ui/DiggaLookAndFeel.cpp
-    source/ui/TempoDisplay.cpp
+    source/ui/TrapWinLookAndFeel.cpp
     source/ui/FormatSwitch.cpp
-    source/ui/RecordLabel.cpp
-    source/ui/TrackRow.cpp
-    source/ui/TrackColumn.cpp
-    source/ui/FxPanel.cpp
+    source/ui/Header.cpp
+    source/ui/Vinyl.cpp
+    source/ui/SampleList.cpp
+    source/ui/EditorPanel.cpp
     source/ui/MainView.cpp)
 
 # signalsmith-stretch 1.4.0 + signalsmith-linear 0.6.4 (MIT), vendored header-only
-target_include_directories(DiggaKilla PRIVATE source)
-target_include_directories(DiggaKilla SYSTEM PRIVATE
+target_include_directories(TrapWinSample PRIVATE source)
+target_include_directories(TrapWinSample SYSTEM PRIVATE
     third_party/signalsmith-stretch/include
     third_party/signalsmith-linear/include)
 
-target_compile_definitions(DiggaKilla PUBLIC
+target_compile_definitions(TrapWinSample PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -99,9 +98,9 @@ target_compile_definitions(DiggaKilla PUBLIC
     JUCE_USE_OGGVORBIS=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
-target_link_libraries(DiggaKilla
+target_link_libraries(TrapWinSample
     PRIVATE
-        DiggaKillaAssets
+        TrapWinAssets
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
@@ -110,17 +109,17 @@ target_link_libraries(DiggaKilla
         juce::juce_recommended_warning_flags)
 
 # ------------------------------------------------------------------------------
-# Dev tool: headless UI snapshot (cmake -DDIGGA_BUILD_TOOLS=ON)
+# Dev tool: headless UI snapshot (cmake -DTRAPWIN_BUILD_TOOLS=ON)
 # ------------------------------------------------------------------------------
-option(DIGGA_BUILD_TOOLS "Build developer tools" OFF)
+option(TRAPWIN_BUILD_TOOLS "Build developer tools" OFF)
 
-if(DIGGA_BUILD_TOOLS)
-    juce_add_console_app(DiggaKillaSnapshot PRODUCT_NAME "DiggaKillaSnapshot")
-    target_sources(DiggaKillaSnapshot PRIVATE tools/Snapshot.cpp)
+if(TRAPWIN_BUILD_TOOLS)
+    juce_add_console_app(TrapWinTest PRODUCT_NAME "TrapWinTest")
+    target_sources(TrapWinTest PRIVATE tools/Snapshot.cpp)
     # reuse the plugin's compiled JUCE modules instead of building them twice
-    target_include_directories(DiggaKillaSnapshot PRIVATE source
-        $<TARGET_PROPERTY:DiggaKilla,INCLUDE_DIRECTORIES>)
-    target_compile_definitions(DiggaKillaSnapshot PRIVATE
-        $<TARGET_PROPERTY:DiggaKilla,COMPILE_DEFINITIONS>)
-    target_link_libraries(DiggaKillaSnapshot PRIVATE DiggaKilla)
+    target_include_directories(TrapWinTest PRIVATE source
+        $<TARGET_PROPERTY:TrapWinSample,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(TrapWinTest PRIVATE
+        $<TARGET_PROPERTY:TrapWinSample,COMPILE_DEFINITIONS>)
+    target_link_libraries(TrapWinTest PRIVATE TrapWinSample)
 endif()

@@ -16,6 +16,8 @@ struct SpectralFeatures
     float centroid = 0.0f;     // Hz
     float flatness = 0.0f;     // 0 = tonal, 1 = noise
     float lowRatio = 0.0f;     // energy share below 150 Hz
+    float midRatio = 0.0f;     // 150 Hz .. 2.5 kHz
+    float highRatio = 0.0f;    // above 5 kHz
     float tonalness = 0.0f;    // chroma peakiness, 0..1
     std::array<float, 12> chroma {};   // sums to 1
 };

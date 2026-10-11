@@ -1,18 +1,14 @@
 #include "core/Engine.h"
 
-#include "kill/KillEngine.h"
 #include "loops/LoopGenerator.h"
 #include "oneshots/OneShotExtractor.h"
-
-#include <thread>
 
 namespace digga
 {
 
 namespace
 {
-    constexpr int loopPeaks = 180, shotPeaks = 70;
-    constexpr size_t maxUndo = 30;
+    constexpr int loopPeaks = 600, shotPeaks = 300;
 
     template <typename Fn>
     void onMessageThread (juce::WeakReference<Engine> weak, Fn&& fn)
@@ -23,32 +19,47 @@ namespace
                 fn (*engine);
         });
     }
-
-    juce::String seedsToString (const std::array<juce::uint32, Engine::variationsPerKill>& seeds)
-    {
-        juce::StringArray parts;
-        for (auto s : seeds)
-            parts.add (juce::String ((juce::int64) s));
-        return parts.joinIntoString (",");
-    }
-
-    std::array<juce::uint32, Engine::variationsPerKill> seedsFromString (const juce::String& text)
-    {
-        std::array<juce::uint32, Engine::variationsPerKill> seeds {};
-        const auto parts = juce::StringArray::fromTokens (text, ",", {});
-        for (int i = 0; i < juce::jmin ((int) seeds.size(), parts.size()); ++i)
-            seeds[(size_t) i] = (juce::uint32) parts[i].getLargeIntValue();
-        return seeds;
-    }
 }
 
+// ---------------------------------------------------------------------------- SampleItem
+juce::String SampleItem::detail (double rate) const
+{
+    const juce::String dot (juce::CharPointer_UTF8 (" \xc2\xb7 "));
+    const int at = (int) juce::jmax (0.0, sourceSeconds);
+    const auto from = "from " + juce::String (at / 60) + ":" + juce::String (at % 60).paddedLeft ('0', 2);
+    if (kind == ClipKind::loop)
+        return juce::String (bars) + " bars" + dot + from;
+    return audio::formatDuration (lengthSeconds (rate)) + dot + from;
+}
+
+juce::String SampleItem::fileTag() const
+{
+    auto tag = name.replaceCharacter (' ', '_');
+    if (kind == ClipKind::loop)
+        tag << "_" << bars << "bars";
+    return tag.removeCharacters ("\\/:*?\"<>|");
+}
+
+double SampleItem::lengthSeconds (double rate) const
+{
+    return edited != nullptr && rate > 0.0 ? edited->getNumSamples() / rate : 0.0;
+}
+
+// ---------------------------------------------------------------------------- Engine
 Engine::Engine (JobQueue& j, ClipPlayer& p) : jobs (j), player (p)
 {
-    // create the weak-reference master up front so worker threads can copy it
-    juce::WeakReference<Engine> warmUp (this);
+    juce::WeakReference<Engine> warmUp (this);   // master created before worker threads copy it
 }
 
 Engine::~Engine() = default;
+
+const SampleItem* Engine::find (int id) const
+{
+    for (const auto& item : items)
+        if (item.id == id)
+            return &item;
+    return nullptr;
+}
 
 double Engine::getProjectBpm() const noexcept
 {
@@ -57,7 +68,6 @@ double Engine::getProjectBpm() const noexcept
     return hasAnalysis ? analysisResult.bpm : 120.0;
 }
 
-// ---------------------------------------------------------------------------- source & analysis
 void Engine::sourceReady (AudioPtr audio, double rate)
 {
     onMessageThread (this, [audio, rate] (Engine& e)
@@ -71,15 +81,14 @@ void Engine::sourceReady (AudioPtr audio, double rate)
 void Engine::newSampleChosen()
 {
     ++generation;
-    source = nullptr;
-    monoSource = nullptr;
+    source = monoSource = nullptr;
+    posteriors = nullptr;
+    notes = nullptr;
     hasAnalysis = false;
     sampleBpmOverride = 0.0;
-    tree.clear();
-    undoStack.clear();
-    busy.clear();
-    replay.clear();
-    pendingSpec.reset();
+    items.clear();
+    pendingEdits.clear();
+    pendingSelectedKey.clear();
     selectedId = -1;
     player.setSelected (-1);
     phase = Phase::empty;
@@ -93,9 +102,17 @@ void Engine::startAnalysis()
     if (source == nullptr)
         return;
 
+    // keep edits of the current results when the same song is re-analysed (sample-rate change)
+    for (const auto& item : items)
+        if (! item.edit.isDefault() && pendingEdits.count (item.key) == 0)
+            pendingEdits[item.key] = item.edit;
+    if (const auto* selected = find (selectedId))
+        if (pendingSelectedKey.isEmpty())
+            pendingSelectedKey = selected->key;
+
     const auto gen = ++generation;
     phase = Phase::analysing;
-    busy.clear();
+    statusDetail = "FINDING TEMPO, KEY & MELODY";
     sendChangeMessage();
 
     juce::WeakReference<Engine> weak (this);
@@ -103,7 +120,6 @@ void Engine::startAnalysis()
     {
         auto mono = std::make_shared<const juce::AudioBuffer<float>> (audio::toMono (*src));
         auto result = analysis::analyse (mono->getReadPointer (0), mono->getNumSamples(), rate);
-
         if (tempoOverride > 0.0)
         {
             result.bpm = tempoOverride;
@@ -111,12 +127,19 @@ void Engine::startAnalysis()
                                                              mono->getNumSamples(), tempoOverride);
         }
 
-        onMessageThread (weak, [gen, result, mono] (Engine& e)
+        // what is pitched, and when (melody starts, notes for one-shots)
+        const auto modelRate = midi::toModelRate (*src, rate);
+        auto post = std::make_shared<const midi::Posteriors> (midi::computePosteriors (modelRate.data(), (int) modelRate.size()));
+        auto decoded = std::make_shared<const std::vector<midi::Note>> (midi::decodeNotes (*post));
+
+        onMessageThread (weak, [gen, result, mono, post, decoded] (Engine& e)
         {
             if (gen != e.generation)
                 return;
             e.analysisResult = result;
             e.monoSource = mono;
+            e.posteriors = post;
+            e.notes = decoded;
             e.hasAnalysis = true;
             e.startGeneration();
         });
@@ -127,7 +150,6 @@ void Engine::applyOverrideTempo()
 {
     if (! hasAnalysis || monoSource == nullptr)
         return;
-
     analysisResult.bpm = sampleBpmOverride > 0.0 ? sampleBpmOverride : analysisResult.detectedBpm;
     analysisResult.downbeatSeconds = analysis::findDownbeat (*analysisResult.onsets, monoSource->getReadPointer (0),
                                                              monoSource->getNumSamples(), analysisResult.bpm);
@@ -137,7 +159,6 @@ void Engine::setSampleBpm (double bpm)
 {
     if (! hasAnalysis)
         return;
-
     sampleBpmOverride = juce::jlimit (40.0, 250.0, std::round (bpm * 100.0) / 100.0);
     applyOverrideTempo();
     startGeneration();
@@ -147,295 +168,190 @@ void Engine::setHostBpm (double bpm)
 {
     if (juce::approximatelyEqual (bpm, hostBpm))
         return;
-
     hostBpm = bpm;
     if (phase == Phase::ready && std::abs (getProjectBpm() - generatedBpm) > 0.01)
         startGeneration();
     sendChangeMessage();
 }
 
-// ---------------------------------------------------------------------------- generation
 void Engine::startGeneration()
 {
     if (! hasAnalysis || source == nullptr)
         return;
 
-    auto spec = pendingSpec.has_value() && pendingSpec->authoritative ? *pendingSpec : specFromTree();
-    spec.authoritative = true;
-    pendingSpec = spec;   // kept until the new results arrive (state saves stay complete)
+    for (const auto& item : items)
+        if (! item.edit.isDefault() && pendingEdits.count (item.key) == 0)
+            pendingEdits[item.key] = item.edit;
+    if (const auto* selected = find (selectedId))
+        if (pendingSelectedKey.isEmpty())
+            pendingSelectedKey = selected->key;
 
     const auto gen = ++generation;
     phase = Phase::generating;
-    busy.clear();
-    replay.clear();
+    statusDetail = "CUTTING LOOPS & ONE-SHOTS";
     sendChangeMessage();
 
     const double bpm = getProjectBpm();
     juce::WeakReference<Engine> weak (this);
 
-    jobs.add ([weak, gen, src = source, rate = sampleRate, a = analysisResult, bpm]
+    jobs.add ([weak, gen, src = source, rate = sampleRate, a = analysisResult, post = posteriors, decoded = notes, bpm]
     {
-        std::vector<ResultNode> nodes;
+        const auto structure = analysis::analyseStructure (*src, rate, a, *post);
+        std::vector<SampleItem> made;
 
-        for (auto& loop : loops::generate (*src, rate, a, bpm))
+        int loopIndex = 1;
+        for (auto& loop : loops::generateSectionLoops (*src, rate, a, structure, bpm))
         {
-            ResultNode n;
-            n.kind = ClipKind::loop;
-            n.slot = loop.slot;
-            n.bars = loop.bars;
-            auto buffer = std::make_shared<const juce::AudioBuffer<float>> (std::move (loop.audio));
-            n.peaks = audio::computePeaks (*buffer, loopPeaks);
-            n.audio = std::move (buffer);
-            nodes.push_back (std::move (n));
+            SampleItem item;
+            item.kind = ClipKind::loop;
+            item.key = "L" + juce::String (loopIndex++);
+            item.name = loop.name;
+            item.bars = loop.bars;
+            item.sourceSeconds = loop.sourceSeconds;
+            item.original = std::make_shared<const juce::AudioBuffer<float>> (std::move (loop.audio));
+            item.edited = item.original;
+            item.originalPeaks = audio::computePeaks (*item.original, loopPeaks);
+            item.peaks = item.originalPeaks;
+            made.push_back (std::move (item));
         }
 
-        int index = 1;
-        for (auto& shot : oneshots::extract (*src, rate, 8))
+        int shotIndex = 1;
+        for (auto& shot : oneshots::extract (*src, rate, *decoded))
         {
-            ResultNode n;
-            n.kind = ClipKind::shot;
-            n.slot = juce::String (index++);
-            auto buffer = std::make_shared<const juce::AudioBuffer<float>> (std::move (shot));
-            n.peaks = audio::computePeaks (*buffer, shotPeaks);
-            n.audio = std::move (buffer);
-            nodes.push_back (std::move (n));
+            SampleItem item;
+            item.kind = ClipKind::shot;
+            item.key = "S" + juce::String (shotIndex++);
+            item.name = shot.name;
+            item.category = shot.category;
+            item.sourceSeconds = shot.sourceSeconds;
+            item.original = std::make_shared<const juce::AudioBuffer<float>> (std::move (shot.audio));
+            item.edited = item.original;
+            item.originalPeaks = audio::computePeaks (*item.original, shotPeaks);
+            item.peaks = item.originalPeaks;
+            made.push_back (std::move (item));
         }
 
-        onMessageThread (weak, [gen, nodes, bpm] (Engine& e)
+        onMessageThread (weak, [gen, made, bpm] (Engine& e)
         {
             if (gen != e.generation)
                 return;
 
-            const auto restored = e.pendingSpec.value_or (Spec {});
-            e.pendingSpec.reset();
-
-            e.tree.clear();
-            e.undoStack.clear();
-            for (const auto& n : nodes)
-                e.tree.add (n);
+            e.items = made;
+            for (auto& item : e.items)
+                item.id = e.nextId++;
 
             e.generatedBpm = bpm;
             e.phase = Phase::ready;
+            e.statusDetail.clear();
 
             e.selectedId = -1;
-            if (const auto* selected = e.tree.findByKey (restored.selectedKey))
-                e.selectedId = selected->id;
-            if (e.selectedId < 0)
-                for (const auto& n : e.tree.all())
-                    if (n.isRoot()) { e.selectedId = n.id; break; }
+            for (const auto& item : e.items)
+                if (item.key == e.pendingSelectedKey)
+                    e.selectedId = item.id;
+            if (e.selectedId < 0 && ! e.items.empty())
+                e.selectedId = e.items.front().id;
             e.player.setSelected (e.selectedId);
+            e.pendingSelectedKey.clear();
 
-            e.replay = restored.batches;
-            e.pendingSpec = Spec { {}, restored.collapsed, restored.selectedKey, false };   // folding / selection for replayed nodes
-
-            e.publishBank();
-            e.storeState();
-            e.sendChangeMessage();
-            e.pumpReplay();
-        });
-    });
-}
-
-// ---------------------------------------------------------------------------- KILL
-void Engine::kill (int nodeId, float strength)
-{
-    if (phase != Phase::ready || isBusy (nodeId))
-        return;
-
-    std::array<juce::uint32, variationsPerKill> seeds {};
-    auto& random = juce::Random::getSystemRandom();
-    for (auto& s : seeds)
-        s = (juce::uint32) random.nextInt();
-
-    startKill (nodeId, seeds, juce::jlimit (0.0f, 1.0f, strength), false);
-}
-
-void Engine::startKill (int nodeId, const std::array<juce::uint32, variationsPerKill>& seeds, float strength, bool replaying)
-{
-    const auto* node = tree.find (nodeId);
-    if (node == nullptr || node->audio == nullptr || ! hasAnalysis)
-    {
-        if (replaying)
-            pumpReplay();
-        return;
-    }
-
-    busy.insert (nodeId);
-    sendChangeMessage();
-
-    kill::Context context;
-    context.isLoop = node->kind == ClipKind::loop;
-    context.sampleRate = sampleRate;
-    context.bpm = generatedBpm;
-    context.keyRoot = analysisResult.keyRoot;
-    context.minor = analysisResult.minor;
-
-    juce::WeakReference<Engine> weak (this);
-    jobs.add ([weak, gen = generation, nodeId, parent = node->audio, context, seeds, strength, replaying]
-    {
-        std::array<AudioPtr, variationsPerKill> results;
-        std::array<std::vector<float>, variationsPerKill> peaks;
-        {
-            std::vector<std::thread> workers;
-            for (size_t i = 0; i < seeds.size(); ++i)
-                workers.emplace_back ([&, i]
+            // re-apply editor settings saved with the project / before regeneration
+            const auto edits = e.pendingEdits;
+            e.pendingEdits.clear();
+            for (auto& item : e.items)
+                if (const auto it = edits.find (item.key); it != edits.end())
                 {
-                    auto buffer = std::make_shared<const juce::AudioBuffer<float>> (
-                        kill::makeVariation (*parent, context, strength, seeds[i]));
-                    peaks[i] = audio::computePeaks (*buffer, context.isLoop ? loopPeaks : shotPeaks);
-                    results[i] = std::move (buffer);
-                });
-            for (auto& w : workers)
-                w.join();
-        }
-
-        onMessageThread (weak, [gen, nodeId, results, peaks, seeds, strength, replaying] (Engine& e)
-        {
-            e.busy.erase (nodeId);
-            if (gen != e.generation)
-                return;
-
-            const auto* parentNode = e.tree.find (nodeId);
-            if (parentNode == nullptr)
-            {
-                e.sendChangeMessage();
-                if (replaying)
-                    e.pumpReplay();
-                return;
-            }
-
-            if (! replaying)
-            {
-                e.undoStack.push_back (e.tree);
-                if (e.undoStack.size() > maxUndo)
-                    e.undoStack.erase (e.undoStack.begin());
-            }
-
-            const auto kind = parentNode->kind;
-            const auto slot = parentNode->slot;
-            const auto bars = parentNode->bars;
-            const auto path = parentNode->path;
-
-            e.tree.removeDescendants (nodeId);
-            for (size_t i = 0; i < results.size(); ++i)
-            {
-                ResultNode child;
-                child.parentId = nodeId;
-                child.kind = kind;
-                child.slot = slot;
-                child.bars = bars;
-                child.path = path;
-                child.path.push_back ((int) i + 1);
-                child.seed = seeds[i];
-                child.strength = strength;
-                child.audio = results[i];
-                child.peaks = peaks[i];
-                e.tree.add (std::move (child));
-            }
-
-            if (auto* p = e.tree.find (nodeId))
-                p->expanded = true;
-
-            if (replaying && e.pendingSpec.has_value())
-            {
-                for (const auto& key : e.pendingSpec->collapsed)
-                    if (const auto* n = e.tree.findByKey (key))
-                        e.tree.find (n->id)->expanded = false;
-                if (const auto* n = e.tree.findByKey (e.pendingSpec->selectedKey))
-                {
-                    e.selectedId = n->id;
-                    e.player.setSelected (n->id);
+                    item.edit = it->second;
+                    e.renderEditFor (item.id);
                 }
-            }
-
-            if (e.tree.find (e.selectedId) == nullptr)
-                e.select (nodeId);
 
             e.publishBank();
             e.storeState();
             e.sendChangeMessage();
-
-            if (replaying)
-                e.pumpReplay();
         });
     });
 }
 
-void Engine::pumpReplay()
+// ---------------------------------------------------------------------------- selection & edits
+void Engine::select (int id)
 {
-    while (! replay.empty())
-    {
-        const auto batch = replay.front();
-        replay.erase (replay.begin());
-        if (const auto* node = tree.findByKey (batch.parentKey))
-        {
-            startKill (node->id, batch.seeds, batch.strength, true);
-            return;
-        }
-    }
-
-    // replay finished
-    if (pendingSpec.has_value() && ! pendingSpec->authoritative)
-    {
-        pendingSpec.reset();
-        storeState();
-    }
-}
-
-void Engine::undo()
-{
-    if (undoStack.empty())
+    if (find (id) == nullptr || id == selectedId)
         return;
-
-    tree = undoStack.back();
-    undoStack.pop_back();
-
-    if (tree.find (selectedId) == nullptr)
-    {
-        selectedId = -1;
-        for (const auto& n : tree.all())
-            if (n.isRoot()) { selectedId = n.id; break; }
-        player.setSelected (selectedId);
-    }
-
-    publishBank();
+    selectedId = id;
+    player.setSelected (id);
     storeState();
     sendChangeMessage();
 }
 
-void Engine::setExpanded (int nodeId, bool expanded)
+void Engine::setEdit (int id, const EditSettings& settings)
 {
-    if (auto* node = tree.find (nodeId))
+    for (auto& item : items)
     {
-        node->expanded = expanded;
+        if (item.id != id || item.edit == settings)
+            continue;
+        item.edit = settings;
+        renderEditFor (id);
         storeState();
         sendChangeMessage();
+        return;
     }
 }
 
-void Engine::select (int nodeId)
+void Engine::renderEditFor (int id)
 {
-    if (tree.find (nodeId) == nullptr)
+    const auto* item = find (id);
+    if (item == nullptr)
         return;
-    selectedId = nodeId;
-    player.setSelected (nodeId);
-    storeState();
-    sendChangeMessage();
+
+    const auto token = ++editTokens[id];
+    juce::WeakReference<Engine> weak (this);
+
+    if (item->edit.isDefault())
+    {
+        for (auto& i : items)
+            if (i.id == id)
+            {
+                i.edited = i.original;
+                i.peaks = i.originalPeaks;
+            }
+        publishBank();
+        return;
+    }
+
+    // edits are quick; their own queue keeps them from waiting behind an analysis
+    editJobs.add ([weak, id, token, gen = generation, original = item->original, edit = item->edit,
+                  rate = sampleRate, peaks = (int) item->originalPeaks.size()]
+    {
+        auto rendered = std::make_shared<const juce::AudioBuffer<float>> (renderEdit (*original, edit, rate));
+        auto renderedPeaks = audio::computePeaks (*rendered, peaks);
+
+        onMessageThread (weak, [id, token, gen, rendered, renderedPeaks] (Engine& e)
+        {
+            if (gen != e.generation || e.editTokens[id] != token)
+                return;
+            for (auto& i : e.items)
+                if (i.id == id)
+                {
+                    i.edited = rendered;
+                    i.peaks = renderedPeaks;
+                }
+            e.publishBank();
+            e.sendChangeMessage();
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------- audio thread handoff
 void Engine::publishBank()
 {
     auto bank = std::make_unique<ClipBank>();
-    for (const auto& n : tree.all())
+    for (const auto& item : items)
     {
-        if (n.audio == nullptr)
+        if (item.edited == nullptr)
             continue;
         ClipEntry entry;
-        entry.id = n.id;
-        entry.audio = n.audio;
-        entry.isLoop = n.kind == ClipKind::loop;
-        entry.beats = entry.isLoop ? n.bars * 4.0 : 0.0;
+        entry.id = item.id;
+        entry.audio = item.edited;
+        entry.isLoop = item.kind == ClipKind::loop;
+        entry.beats = entry.isLoop && generatedBpm > 0.0 ? item.edited->getNumSamples() / sampleRate * generatedBpm / 60.0 : 0.0;
         bank->entries.push_back (std::move (entry));
     }
     std::sort (bank->entries.begin(), bank->entries.end(), [] (const ClipEntry& a, const ClipEntry& b) { return a.id < b.id; });
@@ -443,60 +359,22 @@ void Engine::publishBank()
 }
 
 // ---------------------------------------------------------------------------- state
-Engine::Spec Engine::specFromTree() const
-{
-    Spec spec;
-    for (const auto& n : tree.all())
-    {
-        auto children = tree.childrenOf (n.id);
-        if (children.empty())
-            continue;
-
-        Batch batch;
-        batch.parentKey = n.key();
-        for (int childId : children)
-        {
-            const auto* child = tree.find (childId);
-            const int index = child->path.empty() ? 0 : child->path.back() - 1;
-            if (juce::isPositiveAndBelow (index, variationsPerKill))
-                batch.seeds[(size_t) index] = child->seed;
-            batch.strength = child->strength;
-        }
-        spec.batches.push_back (batch);
-
-        if (! n.expanded)
-            spec.collapsed.add (n.key());
-    }
-
-    if (const auto* selected = tree.find (selectedId))
-        spec.selectedKey = selected->key();
-
-    // batches that are still waiting to be replayed
-    for (const auto& b : replay)
-        spec.batches.push_back (b);
-
-    return spec;
-}
-
 void Engine::storeState()
 {
-    auto spec = specFromTree();
-    if (pendingSpec.has_value() && pendingSpec->authoritative)
-        spec = *pendingSpec;
-
     juce::ValueTree state ("Engine");
     state.setProperty ("sampleBpm", sampleBpmOverride, nullptr);
-    state.setProperty ("selected", spec.selectedKey, nullptr);
-    state.setProperty ("collapsed", spec.collapsed.joinIntoString ("|"), nullptr);
 
-    for (const auto& b : spec.batches)
-    {
-        juce::ValueTree batch ("Kill");
-        batch.setProperty ("parent", b.parentKey, nullptr);
-        batch.setProperty ("seeds", seedsToString (b.seeds), nullptr);
-        batch.setProperty ("strength", b.strength, nullptr);
-        state.appendChild (batch, nullptr);
-    }
+    juce::String selected = pendingSelectedKey;
+    if (const auto* item = find (selectedId))
+        selected = item->key;
+    state.setProperty ("selected", selected, nullptr);
+
+    auto edits = pendingEdits;
+    for (const auto& item : items)
+        if (! item.edit.isDefault())
+            edits[item.key] = item.edit;
+    for (const auto& [key, edit] : edits)
+        state.appendChild (edit.toValueTree (key), nullptr);
 
     const juce::ScopedLock sl (stateLock);
     savedState = state;
@@ -516,29 +394,18 @@ void Engine::setState (const juce::ValueTree& state, bool sampleWillReload)
     const auto copy = state.createCopy();
     onMessageThread (this, [copy, sampleWillReload] (Engine& e)
     {
-        Spec spec;
-        spec.selectedKey = copy["selected"].toString();
-        spec.collapsed = juce::StringArray::fromTokens (copy["collapsed"].toString(), "|", {});
-        spec.collapsed.removeEmptyStrings();
-
-        for (const auto& child : copy)
-        {
-            if (! child.hasType ("Kill"))
-                continue;
-            Batch b;
-            b.parentKey = child["parent"].toString();
-            b.seeds = seedsFromString (child["seeds"].toString());
-            b.strength = (float) (double) child.getProperty ("strength", 0.5);
-            spec.batches.push_back (b);
-        }
-
         e.sampleBpmOverride = (double) copy.getProperty ("sampleBpm", 0.0);
-        spec.authoritative = true;
-        e.pendingSpec = spec;
+        e.pendingSelectedKey = copy["selected"].toString();
+        e.pendingEdits.clear();
+        for (const auto& child : copy)
+            if (child.hasType ("Edit"))
+                e.pendingEdits[child["key"].toString()] = EditSettings::fromValueTree (child);
+
         e.storeState();
 
         if (! sampleWillReload && e.hasAnalysis)
         {
+            e.items.clear();   // regenerate so the restored edits are applied to fresh results
             e.applyOverrideTempo();
             e.startGeneration();
         }

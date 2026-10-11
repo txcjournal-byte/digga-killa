@@ -1,23 +1,43 @@
 #pragma once
 
-#include "analysis/Analyzer.h"
+#include "analysis/Structure.h"
+#include "core/Edit.h"
 #include "core/JobQueue.h"
-#include "core/ResultTree.h"
 #include "playback/ClipPlayer.h"
 
 #include <juce_events/juce_events.h>
 
-#include <array>
-#include <optional>
-#include <set>
+#include <map>
 
 namespace digga
 {
 
-/** Owns the analysis and the result tree, and runs analysis, loop/one-shot
-    generation and KILL on the JobQueue. Everything except the members marked
-    "any thread" is message-thread only; listeners hear about changes through
-    ChangeBroadcaster. */
+enum class ClipKind { loop, shot };
+
+/** One result: a loop cut from a song section, or a one-shot. */
+struct SampleItem
+{
+    int id = 0;
+    ClipKind kind = ClipKind::loop;
+    juce::String key;              // stable across sessions: "L3", "S5"
+    juce::String name;             // "Drop", "Kick In", "808 F#1", "Note C#5"
+    juce::String category;         // shots: "Kick", "Snare", ...
+    int bars = 0;                  // loops
+    double sourceSeconds = 0.0;    // where in the song it came from
+
+    AudioPtr original;             // as generated
+    AudioPtr edited;               // after the editor's settings (== original when untouched)
+    std::vector<float> originalPeaks, peaks;
+    EditSettings edit;
+
+    juce::String detail (double sampleRate) const;   // "16 bars · from 0:42"
+    juce::String fileTag() const;                    // "Drop_16bars", "808_F#1"
+    double lengthSeconds (double sampleRate) const;
+};
+
+/** Owns the analysis and the results, and runs analysis, generation and
+    edit rendering on the JobQueue. Message-thread only except where noted;
+    listeners hear about changes through ChangeBroadcaster. */
 class Engine : public juce::ChangeBroadcaster
 {
 public:
@@ -27,78 +47,55 @@ public:
     ~Engine() override;
 
     // ---- any thread
-    /** A (re)decoded source at the host rate. */
     void sourceReady (AudioPtr audio, double sampleRate);
-    /** Snapshot for the host's project file. */
     juce::ValueTree getState() const;
-    /** Restores tempo override, KILL tree (by seeds), selection and folding.
-        If the sample is about to be (re)loaded, the restore waits for it. */
     void setState (const juce::ValueTree& state, bool sampleWillReload);
 
     // ---- message thread
     void newSampleChosen();
     void setHostBpm (double bpm);
     void setSampleBpm (double bpm);
-    void kill (int nodeId, float strength);
-    bool canUndo() const noexcept { return ! undoStack.empty(); }
-    void undo();
-    void setExpanded (int nodeId, bool expanded);
-    void select (int nodeId);
+    void select (int id);
+    void setEdit (int id, const EditSettings& settings);
 
     int getSelected() const noexcept { return selectedId; }
-    const ResultTree& getTree() const noexcept { return tree; }
+    const std::vector<SampleItem>& getItems() const noexcept { return items; }
+    const SampleItem* find (int id) const;
     Phase getPhase() const noexcept { return phase; }
-    bool isBusy (int nodeId) const { return busy.count (nodeId) > 0; }
     const analysis::Analysis* getAnalysis() const noexcept { return hasAnalysis ? &analysisResult : nullptr; }
-    double getProjectBpm() const noexcept;   // host tempo, or the sample's when there is no host
-    double getHostBpm() const noexcept { return hostBpm; }
+    double getProjectBpm() const noexcept;
     double getSampleRate() const noexcept { return sampleRate; }
-
-    static constexpr int variationsPerKill = 6;
+    juce::String getStatusDetail() const { return statusDetail; }
 
 private:
-    struct Batch
-    {
-        juce::String parentKey;
-        std::array<juce::uint32, variationsPerKill> seeds {};
-        float strength = 0.5f;
-    };
-
-    struct Spec
-    {
-        std::vector<Batch> batches;
-        juce::StringArray collapsed;
-        juce::String selectedKey;
-        bool authoritative = false;   // restored from a project: replaces the current tree
-    };
-
     void startAnalysis();
     void startGeneration();
-    void startKill (int nodeId, const std::array<juce::uint32, variationsPerKill>& seeds, float strength, bool replaying);
-    void pumpReplay();
+    void renderEditFor (int id);
+    void applyOverrideTempo();
     void publishBank();
     void storeState();
-    Spec specFromTree() const;
-    void applyOverrideTempo();
 
     JobQueue& jobs;
+    JobQueue editJobs;
     ClipPlayer& player;
 
     AudioPtr source, monoSource;
     double sampleRate = 44100.0;
     analysis::Analysis analysisResult;
+    std::shared_ptr<const midi::Posteriors> posteriors;
+    std::shared_ptr<const std::vector<midi::Note>> notes;
     bool hasAnalysis = false;
     double sampleBpmOverride = 0.0;
     double hostBpm = 0.0;
     double generatedBpm = 0.0;
 
-    ResultTree tree;
-    std::vector<ResultTree> undoStack;
-    std::set<int> busy;
-    std::vector<Batch> replay;
-    std::optional<Spec> pendingSpec;
-    int selectedId = -1;
+    std::vector<SampleItem> items;
+    std::map<juce::String, EditSettings> pendingEdits;   // restored edits waiting for their sample
+    juce::String pendingSelectedKey;
+    std::map<int, juce::uint32> editTokens;
+    int selectedId = -1, nextId = 1;
     Phase phase = Phase::empty;
+    juce::String statusDetail;
     juce::uint32 generation = 0;
 
     mutable juce::CriticalSection stateLock;

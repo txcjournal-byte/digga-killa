@@ -1,17 +1,17 @@
 #pragma once
 
 #include "PluginProcessor.h"
-#include "ui/DiggaLookAndFeel.h"
 #include "ui/MainView.h"
+#include "ui/TrapWinLookAndFeel.h"
 
 namespace digga
 {
 
-class DiggaKillaEditor : public juce::AudioProcessorEditor
+class TrapWinEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit DiggaKillaEditor (DiggaKillaProcessor&);
-    ~DiggaKillaEditor() override;
+    explicit TrapWinEditor (TrapWinProcessor&);
+    ~TrapWinEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -19,12 +19,12 @@ public:
 private:
     static int initialWidth (int savedWidth);
 
-    DiggaKillaProcessor& processor;
+    TrapWinProcessor& processor;
     bool sizeReady = false;
-    DiggaLookAndFeel lookAndFeel;
+    TrapWinLookAndFeel lookAndFeel;
     MainView view;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DiggaKillaEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrapWinEditor)
 };
 
 } // namespace digga

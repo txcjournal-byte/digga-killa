@@ -16,8 +16,8 @@ struct ExportOptions
 {
     double bpm = 140.0;             // tempo the clip plays at
     double lengthSeconds = 0.0;     // clip length (MIDI clip ends here)
-    int transpose = 0;              // PITCH knob, semitones
-    bool reverse = false;           // REVERSE switch
+    int transpose = 0;              // editor pitch, semitones
+    bool reverse = false;           // editor reverse
 };
 
 /** Standard MIDI file (type 1, 960 PPQ) with tempo, 4/4 and the notes. */

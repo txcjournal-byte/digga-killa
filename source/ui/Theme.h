@@ -5,48 +5,54 @@
 namespace digga::theme
 {
 
-// ---- palette: dirty white paper, black ink, one red accent (stamp ink)
-inline const juce::Colour paper      { 0xffe8e1cf };
-inline const juce::Colour paperLight { 0xfff1ebdc };
-inline const juce::Colour paperDark  { 0xffcfc5ad };
-inline const juce::Colour ink        { 0xff161513 };
-inline const juce::Colour inkSoft    { 0xff45423c };
-inline const juce::Colour muted      { 0xff938d80 };
-inline const juce::Colour red        { 0xffc8202a };
+// ---- trapwin.com "Chrome" design tokens (assets/trapwin.css)
+inline const juce::Colour bg       { 0xff04060a };
+inline const juce::Colour card     { 0xff0a0f18 };
+inline const juce::Colour card2    { 0xff0b111c };
+inline const juce::Colour well     { 0xff05070b };
+inline const juce::Colour text     { 0xffe6ecf7 };
+inline const juce::Colour text2    { 0xffa9b6cc };
+inline const juce::Colour muted    { 0xff8794ab };
+inline const juce::Colour accent   { 0xff7fa6e8 };
+inline const juce::Colour accentL  { 0xff9fc3ff };
+inline const juce::Colour glow     { 0x804676c4 };
+inline const juce::Colour line     { 0x2e9fc3ff };   // rgba(159,195,255,.18)
 
-/** Keeps the embedded typefaces alive; hold one of these (via
-    juce::SharedResourcePointer) for as long as the UI exists. */
+/** Keeps the embedded typefaces alive (hold via SharedResourcePointer). */
 struct Typefaces
 {
     Typefaces();
-
-    juce::Typeface::Ptr display;         // Archivo Black (OFL) – brutal poster headlines
-    juce::Typeface::Ptr condensed;       // Barlow Condensed SemiBold (OFL) – tracklist rows
-    juce::Typeface::Ptr condensedBold;   // Barlow Condensed Bold
-    juce::Typeface::Ptr mono;            // Courier Prime (OFL) – typewriter labels
-    juce::Typeface::Ptr monoBold;
+    juce::Typeface::Ptr display;   // Archivo Black Italic, expanded (web headings)
+    juce::Typeface::Ptr bold;      // Archivo ExtraBold
+    juce::Typeface::Ptr body;      // Archivo SemiBold
+    juce::Typeface::Ptr mono;      // IBM Plex Mono Medium
+    juce::Typeface::Ptr monoBold;  // IBM Plex Mono SemiBold
 };
 
-/** Heavy headline face. horizontalScale < 1 squeezes it towards the
-    condensed poster look of the reference. */
-juce::Font display (float height, float horizontalScale = 1.0f);
-juce::Font condensed (float height, bool bold = false);
-juce::Font mono (float height, bool bold = false);
+juce::Font display (float height);
+juce::Font bold (float height);
+juce::Font body (float height);
+juce::Font mono (float height, bool semiBold = false);
 
-/** Glyphs of a single line of text as a path, fitted into an area. With
-    stretch = true the proportions are ignored (poster-style lettering). */
-juce::Path textPath (const juce::String& text, const juce::Font& font,
-                     juce::Rectangle<float> area, bool stretch,
-                     juce::Justification justification = juce::Justification::centred);
+/** Upper-case mono label with the web's wide letter spacing. */
+void drawMonoLabel (juce::Graphics&, const juce::String& text, juce::Rectangle<float> area,
+                    juce::Justification, juce::Colour colour, float height = 11.0f);
 
-/** Knocks tiny paper-coloured specks and scratches out of whatever is inside
-    the clip path — the worn print look. Deterministic for a given seed. */
-void addGrunge (juce::Graphics& g, const juce::Path& clip, juce::Colour speckColour,
-                int seed, float density);
+/** Glyph outline of a single line of text fitted into an area. */
+juce::Path textPath (const juce::String& text, const juce::Font& font, juce::Rectangle<float> area,
+                     juce::Justification justification = juce::Justification::centredLeft);
 
-// ---- skin artwork cut from docs/design.png by tools/make_skin.py
-juce::Image skinBackground();   // full panel, design pixel size (1344 x 896)
-juce::Image skinDropSample();   // "DROP SAMPLE" print, ink + alpha
-juce::Image skinKillStamp();    // KILL rubber stamp, red + alpha
+/** Fills a path with the web's liquid-chrome gradient (+ blue glow). */
+void fillChrome (juce::Graphics&, const juce::Path& path, bool withGlow = true);
+
+/** Chrome pill button background (".tw-btn"). */
+void drawChromePill (juce::Graphics&, juce::Rectangle<float> area, bool highlighted, bool down);
+
+/** Dark rounded card with hairline border and soft blue glow (".tw-glow"). */
+void drawCard (juce::Graphics&, juce::Rectangle<float> area, float radius = 20.0f);
+
+/** Waveform from 0..1 peaks, mirrored around the centre. */
+void drawWaveform (juce::Graphics&, const std::vector<float>& peaks, juce::Rectangle<float> area,
+                   juce::Colour top, juce::Colour bottom);
 
 } // namespace digga::theme

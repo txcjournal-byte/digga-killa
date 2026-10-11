@@ -6,101 +6,121 @@ namespace digga::theme
 {
 
 Typefaces::Typefaces()
-    : display  (juce::Typeface::createSystemTypefaceFor (BinaryData::ArchivoBlackRegular_ttf,
-                                                         BinaryData::ArchivoBlackRegular_ttfSize)),
-      condensed (juce::Typeface::createSystemTypefaceFor (BinaryData::BarlowCondensedSemiBold_ttf,
-                                                          BinaryData::BarlowCondensedSemiBold_ttfSize)),
-      condensedBold (juce::Typeface::createSystemTypefaceFor (BinaryData::BarlowCondensedBold_ttf,
-                                                              BinaryData::BarlowCondensedBold_ttfSize)),
-      mono     (juce::Typeface::createSystemTypefaceFor (BinaryData::CourierPrimeRegular_ttf,
-                                                         BinaryData::CourierPrimeRegular_ttfSize)),
-      monoBold (juce::Typeface::createSystemTypefaceFor (BinaryData::CourierPrimeBold_ttf,
-                                                         BinaryData::CourierPrimeBold_ttfSize))
+    : display  (juce::Typeface::createSystemTypefaceFor (BinaryData::ArchivoDisplayBlackItalic_ttf, BinaryData::ArchivoDisplayBlackItalic_ttfSize)),
+      bold     (juce::Typeface::createSystemTypefaceFor (BinaryData::ArchivoExtraBold_ttf, BinaryData::ArchivoExtraBold_ttfSize)),
+      body     (juce::Typeface::createSystemTypefaceFor (BinaryData::ArchivoSemiBold_ttf, BinaryData::ArchivoSemiBold_ttfSize)),
+      mono     (juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexMonoMedium_ttf, BinaryData::IBMPlexMonoMedium_ttfSize)),
+      monoBold (juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexMonoSemiBold_ttf, BinaryData::IBMPlexMonoSemiBold_ttfSize))
 {
 }
 
-juce::Font display (float height, float horizontalScale)
+namespace
 {
-    const juce::SharedResourcePointer<Typefaces> faces;
-    return juce::Font (juce::FontOptions (faces->display).withHeight (height)
-                                                         .withHorizontalScale (horizontalScale));
+    juce::Font make (juce::Typeface::Ptr Typefaces::* face, float height)
+    {
+        const juce::SharedResourcePointer<Typefaces> faces;
+        return juce::Font (juce::FontOptions ((*faces).*face).withHeight (height));
+    }
 }
 
-juce::Font condensed (float height, bool bold)
+juce::Font display (float h)          { return make (&Typefaces::display, h); }
+juce::Font bold (float h)             { return make (&Typefaces::bold, h); }
+juce::Font body (float h)             { return make (&Typefaces::body, h); }
+juce::Font mono (float h, bool semi)  { return make (semi ? &Typefaces::monoBold : &Typefaces::mono, h); }
+
+void drawMonoLabel (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> area,
+                    juce::Justification j, juce::Colour colour, float height)
 {
-    const juce::SharedResourcePointer<Typefaces> faces;
-    return juce::Font (juce::FontOptions (bold ? faces->condensedBold : faces->condensed).withHeight (height));
+    g.setColour (colour);
+    g.setFont (mono (height, true).withExtraKerningFactor (0.16f));
+    g.drawText (s.toUpperCase(), area, j, false);
 }
 
-juce::Font mono (float height, bool bold)
-{
-    const juce::SharedResourcePointer<Typefaces> faces;
-    return juce::Font (juce::FontOptions (bold ? faces->monoBold : faces->mono).withHeight (height));
-}
-
-juce::Path textPath (const juce::String& text, const juce::Font& font,
-                     juce::Rectangle<float> area, bool stretch, juce::Justification justification)
+juce::Path textPath (const juce::String& s, const juce::Font& font, juce::Rectangle<float> area, juce::Justification j)
 {
     juce::GlyphArrangement glyphs;
-    glyphs.addLineOfText (font, text, 0.0f, 0.0f);
-
-    juce::Path path;
-    glyphs.createPath (path);
-
-    if (! path.isEmpty())
-        path.applyTransform (path.getTransformToScaleToFit (area, ! stretch, justification));
-
-    return path;
+    glyphs.addLineOfText (font, s, 0.0f, 0.0f);
+    juce::Path p;
+    glyphs.createPath (p);
+    if (! p.isEmpty())
+        p.applyTransform (p.getTransformToScaleToFit (area, true, j));
+    return p;
 }
 
-void addGrunge (juce::Graphics& g, const juce::Path& clip, juce::Colour speckColour,
-                int seed, float density)
+void fillChrome (juce::Graphics& g, const juce::Path& path, bool withGlow)
 {
-    const auto bounds = clip.getBounds();
-    if (bounds.isEmpty())
+    const auto b = path.getBounds();
+    if (b.isEmpty())
         return;
 
-    const juce::Graphics::ScopedSaveState state (g);
-    g.reduceClipRegion (clip);
-
-    juce::Random random (seed);
-    const int numSpecks = (int) (bounds.getWidth() * bounds.getHeight() * density * 0.01f);
-
-    for (int i = 0; i < numSpecks; ++i)
+    if (withGlow)
     {
-        const float x = bounds.getX() + random.nextFloat() * bounds.getWidth();
-        const float y = bounds.getY() + random.nextFloat() * bounds.getHeight();
-        const float r = 0.3f + std::pow (random.nextFloat(), 3.0f) * 2.2f;
-        g.setColour (speckColour.withMultipliedAlpha (0.45f + 0.55f * random.nextFloat()));
-        g.fillEllipse (x - r, y - r, r * 2.0f, r * 2.0f * (0.6f + 0.8f * random.nextFloat()));
+        // soft blue drop-shadow glow
+        juce::DropShadow (glow.withAlpha (0.55f), (int) juce::jmax (6.0f, b.getHeight() * 0.35f), {}).drawForPath (g, path);
     }
 
-    // a few scratches
-    for (int i = 0; i < numSpecks / 60; ++i)
+    juce::ColourGradient chrome (juce::Colour (0xff9aa3b6), 0.0f, b.getY(), juce::Colour (0xfff7f9fd), 0.0f, b.getBottom(), false);
+    chrome.addColour (0.32, juce::Colour (0xfff5f7fc));
+    chrome.addColour (0.47, juce::Colour (0xff9099ad));
+    chrome.addColour (0.50, juce::Colour (0xff151b29));
+    chrome.addColour (0.57, juce::Colour (0xff6f7a90));
+    chrome.addColour (0.82, juce::Colour (0xffdfe5ef));
+    g.setGradientFill (chrome);
+    g.fillPath (path);
+}
+
+void drawChromePill (juce::Graphics& g, juce::Rectangle<float> r, bool highlighted, bool down)
+{
+    const float radius = r.getHeight() * 0.5f;
+    juce::Path pill;
+    pill.addRoundedRectangle (r, radius);
+
+    juce::DropShadow (glow.withAlpha (highlighted ? 0.6f : 0.35f), 14, {}).drawForPath (g, pill);
+
+    juce::ColourGradient grad (juce::Colour (0xfff4f6fb), 0.0f, r.getY(), juce::Colour (0xffe6eaf2), 0.0f, r.getBottom(), false);
+    grad.addColour (0.48, juce::Colour (0xffc9d0dd));
+    grad.addColour (0.52, juce::Colour (0xff8e98ab));
+    g.setGradientFill (grad);
+    g.fillPath (pill);
+
+    if (down)
     {
-        const float x = bounds.getX() + random.nextFloat() * bounds.getWidth();
-        const float y = bounds.getY() + random.nextFloat() * bounds.getHeight();
-        const float angle = random.nextFloat() * juce::MathConstants<float>::twoPi;
-        const float length = 3.0f + random.nextFloat() * 14.0f;
-        g.setColour (speckColour.withMultipliedAlpha (0.35f + 0.4f * random.nextFloat()));
-        g.drawLine (x, y, x + std::cos (angle) * length, y + std::sin (angle) * length,
-                    0.4f + random.nextFloat() * 0.6f);
+        g.setColour (juce::Colours::black.withAlpha (0.15f));
+        g.fillPath (pill);
     }
 }
 
-juce::Image skinBackground()
+void drawCard (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
-    return juce::ImageCache::getFromMemory (BinaryData::background_png, BinaryData::background_pngSize);
+    juce::Path shape;
+    shape.addRoundedRectangle (r, radius);
+    juce::DropShadow (juce::Colour (0x294676c4), 40, {}).drawForPath (g, shape);
+    g.setColour (card);
+    g.fillPath (shape);
+    g.setColour (line);
+    g.strokePath (shape, juce::PathStrokeType (1.0f));
 }
 
-juce::Image skinDropSample()
+void drawWaveform (juce::Graphics& g, const std::vector<float>& peaks, juce::Rectangle<float> area,
+                   juce::Colour top, juce::Colour bottom)
 {
-    return juce::ImageCache::getFromMemory (BinaryData::drop_sample_png, BinaryData::drop_sample_pngSize);
-}
+    if (peaks.empty() || area.isEmpty())
+        return;
 
-juce::Image skinKillStamp()
-{
-    return juce::ImageCache::getFromMemory (BinaryData::kill_stamp_png, BinaryData::kill_stamp_pngSize);
+    const auto n = (int) peaks.size();
+    const float step = area.getWidth() / (float) juce::jmax (1, n - 1);
+    const float mid = area.getCentreY(), half = area.getHeight() * 0.5f;
+
+    juce::Path wave;
+    wave.startNewSubPath (area.getX(), mid);
+    for (int i = 0; i < n; ++i)
+        wave.lineTo (area.getX() + (float) i * step, mid - juce::jmax (0.5f, peaks[(size_t) i] * half));
+    for (int i = n - 1; i >= 0; --i)
+        wave.lineTo (area.getX() + (float) i * step, mid + juce::jmax (0.5f, peaks[(size_t) i] * half));
+    wave.closeSubPath();
+
+    g.setGradientFill (juce::ColourGradient (top, 0.0f, area.getY(), bottom, 0.0f, area.getBottom(), false));
+    g.fillPath (wave);
 }
 
 } // namespace digga::theme

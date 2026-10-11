@@ -37,6 +37,12 @@ Posteriors computePosteriors (const float* mono22k, int numSamples);
     Times are seconds of the 22.05 kHz input. */
 std::vector<Note> decodeNotes (const Posteriors& posteriors);
 
+/** Start time (seconds of the 22.05 kHz input) of a posterior frame. */
+double frameToSeconds (int frame);
+
+/** Mono, band-limited and resampled to the model rate (22.05 kHz). */
+std::vector<float> toModelRate (const juce::AudioBuffer<float>& audio, double sampleRate);
+
 /** Raw model output for one 43844-sample window (testing). */
 void runModelWindow (const float* window, float* note172x88, float* onset172x88, float* contour172x264);
 

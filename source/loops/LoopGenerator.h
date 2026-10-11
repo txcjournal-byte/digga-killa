@@ -1,6 +1,6 @@
 #pragma once
 
-#include "analysis/Analyzer.h"
+#include "analysis/Structure.h"
 #include "core/AudioTools.h"
 
 #include <vector>
@@ -10,18 +10,21 @@ namespace digga::loops
 
 struct GeneratedLoop
 {
-    juce::String slot;          // "A1", "A2", "B1", "B2"
+    juce::String name;          // section it starts: "Kick In", "Drop", ...
     int bars = 8;
+    int startBar = 0;           // bar of the source where it starts
+    double sourceSeconds = 0.0; // where that is in the source
     std::vector<int> sourceBars; // which bars of the source it was built from
     juce::AudioBuffer<float> audio;   // at project tempo, loop-crossfaded
 };
 
-/** Splits the source into bars, scores every candidate section (energy,
-    melodic content, and above all how well its end runs into its start) and
-    renders the four best as tempo-matched, seamless loops:
-    A1 = 8 bars, A2 = 16 bars, B1 = 8 bars, B2 = 16 bars. */
-std::vector<GeneratedLoop> generate (const juce::AudioBuffer<float>& source, double sampleRate,
-                                     const analysis::Analysis& analysis, double projectBpm);
+/** Breaks the whole song into 8- and 16-bar loops that start exactly where its
+    sections start (kick comes in, melody starts, drop, break...). Repeats of
+    the same part (second chorus) are skipped. Loops are stretched to the
+    project tempo and crossfaded so they repeat seamlessly. */
+std::vector<GeneratedLoop> generateSectionLoops (const juce::AudioBuffer<float>& source, double sampleRate,
+                                                 const analysis::Analysis& analysis,
+                                                 const analysis::Structure& structure, double projectBpm);
 
 /** Samples in `bars` bars at the given tempo. */
 inline int barsToSamples (int bars, double bpm, double sampleRate)

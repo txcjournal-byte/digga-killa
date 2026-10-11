@@ -1,58 +1,52 @@
 #pragma once
 
 #include "midi/MidiExport.h"
-#include "ui/FormatSwitch.h"
-#include "ui/FxPanel.h"
-#include "ui/RecordLabel.h"
-#include "ui/TempoDisplay.h"
-#include "ui/TrackColumn.h"
+#include "ui/EditorPanel.h"
+#include "ui/Header.h"
+#include "ui/SampleList.h"
+#include "ui/Vinyl.h"
 
 namespace digga
 {
 
-class DiggaKillaProcessor;
+class TrapWinProcessor;
 
-/** The whole UI at the pixel size of docs/design.png. The static artwork is
-    the skin cut from that file; live controls sit on the exact spots they
-    occupy in it. The editor scales this view uniformly. */
+/** The whole UI at a fixed logical size; the plugin window scales it.
+    Vinyl left, loops & one-shots right, editor below (trapwin.com style). */
 class MainView : public juce::Component,
                  private juce::ChangeListener,
                  private juce::Timer
 {
 public:
-    static constexpr int logicalWidth = 1344;
-    static constexpr int logicalHeight = 896;
+    static constexpr int logicalWidth = 1280;
+    static constexpr int logicalHeight = 800;
 
-    explicit MainView (DiggaKillaProcessor& processor);
+    explicit MainView (TrapWinProcessor& processor);
     ~MainView() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
-    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
 
-    void refreshSampleStatus();
-    void refreshResults();
-    void wireColumn (TrackColumn& column);
+    void refresh();
     void togglePreview (int id);
     void showRowMenu (int id);
     void dragOut (int id);
     void prefetchMidi();
 
-    DiggaKillaProcessor& processor;
+    TrapWinProcessor& processor;
     juce::SharedResourcePointer<theme::Typefaces> typefaces;
-    juce::Image background;
 
-    TempoDisplay tempo;
-    FormatSwitch format;
-    TrackColumn loops, shots;
-    RecordLabel record;
-    FxPanel fx;
-    juce::TooltipWindow tooltips { this, 600 };
+    Header header;
+    Vinyl vinyl;
+    SampleList list;
+    EditorPanel editor;
+    juce::TooltipWindow tooltips { this, 700 };
     midi::TranscriptionCache transcriptions;
+    int shownSelection = -1;
 };
 
 } // namespace digga
