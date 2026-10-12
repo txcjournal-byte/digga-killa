@@ -357,6 +357,12 @@ juce::File Separator::findModelFile()
             .getChildFile ("TrapWin").getChildFile ("TrapWin Sampler").getChildFile (name),
        #if JUCE_MAC
         juce::File ("/Library/Application Support/TrapWin/TrapWin Sampler").getChildFile (name),
+        // any other installed format of the plugin carries a copy
+        juce::File ("/Library/Audio/Plug-Ins/VST3/TrapWin Sampler.vst3/Contents/Resources").getChildFile (name),
+        juce::File ("/Library/Audio/Plug-Ins/Components/TrapWin Sampler.component/Contents/Resources").getChildFile (name),
+        juce::File ("~/Library/Audio/Plug-Ins/VST3/TrapWin Sampler.vst3/Contents/Resources").getChildFile (name),
+        juce::File ("~/Library/Audio/Plug-Ins/Components/TrapWin Sampler.component/Contents/Resources").getChildFile (name),
+        juce::File ("/Applications/TrapWin Sampler.app/Contents/Resources").getChildFile (name),
        #endif
     };
 

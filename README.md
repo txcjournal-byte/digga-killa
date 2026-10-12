@@ -2,12 +2,17 @@
 
 VST3 / AU nástroj (Windows a Mac) pro trapové producenty. Přetáhneš na vinyl song nebo loop (WAV, MP3, AIFF, FLAC) a plugin ho celý rozebere:
 
-- **Loopy podle skutečných začátků.** Plugin rozezná, co hraje v každém taktu (kick, hi-haty, basa/808, melodie přes Basic Pitch) a najde místa, kde začíná nová část: *Intro, Kick In, Melody, Drop, Hook, Break, Outro*. Od každého začátku nařeže 8 a 16taktové loopy přes celý song. Opakované části (druhý refrén) přeskočí. Loopy jsou natažené na tempo projektu a plynule se opakují.
-- **One-shoty, nic náhodného.** Údery jsou rozpoznané (*Kick, 808 s tónem, Snare, Hat, Open Hat, Perc*). Vybírají se nejčistší kusy: ticho před náběhem, nic dalšího přes zvuk, celý dozvuk, kicky bez hi-hatů. Z melodie vybere tóny a akordy, které zní samostatně (*Note C#5, Chord F#m*).
-- **Editor dole.** Klikni na vzorek a pracuj s ním: ořez úchyty (u loopů po dobách), fade in/out, hlasitost, ladění (±12 půltónů, délka se nemění), reverse, reset. Úpravy se ukládají s projektem.
-- **Přetažení do DAW kdykoli.** Řádek v seznamu nebo tlačítko *DRAG TO DAW* v editoru přetáhneš do FL Studia, Abletonu, Logicu a dalších. Přepínač **DRAG AS WAV / MIDI**: WAV s úpravami, nebo MIDI s notami (převod Basic Pitch, i akordy).
+- **Rozdělení na stopy.** Song se nejdřív rozdělí na vokál, bicí, 808/basu a melodii (model Spleeter od Deezeru, přepsaný nativně v C++ – žádný internet, nic se neinstaluje navíc). 3minutový song trvá zhruba 20–40 s.
+- **Loopy podle skutečných začátků.** Plugin ze stop pozná, co hraje v každém taktu, a najde, kde začíná nová část: *Intro, Kick In, Melody, Verse, Hook, Drop, Break, Outro*. Od každého začátku nařeže 8 a 16taktové loopy přes celý song, opakované části přeskočí, loopy natáhne na tempo projektu a plynule je zacyklí.
+- **Loopy jednotlivých stop.** Ke každému songu i *Drop Drums*, *Intro Melody*, *Hook Vox*, *Drop 808* … z částí, kde daná stopa nejvíc hraje.
+- **One-shoty, nic náhodného.** Každý zvuk je vyříznutý ze své stopy, takže pod ním nic nehraje: *Kick, Snare, Hat, Open Hat, Perc* z bicích, *808 F#1* s tónem z basy, *Note* a *Chord* z melodie (Basic Pitch), *Vox* chopy z vokálu. Vybírá nejčistší kusy a končí před dalším úderem.
+- **Prohlížeč po záložkách:** LOOPS · DRUMS · 808 & BASS · MELODY · VOCALS.
+- **Přehled songu.** Celý song s pruhy stop a pojmenovanými částmi; ukáže, odkud vybraný vzorek je. Klik = přehraje song od toho místa.
+- **Editor + mixér stop.** Ořez (po dobách), fade in/out, hlasitost, ladění ±12, reverse, reset – a u loopů mixér stop (VOX / DRUMS / 808 / MELODY, mute / solo): z full loopu uděláš třeba instrumentál nebo jen melodii.
+- **Přetažení do DAW kdykoli.** Řádek nebo *DRAG TO DAW* do FL Studia, Abletonu, Logicu…, jako WAV nebo MIDI (Basic Pitch, i akordy).
+- **EXPORT ALL** uloží všechny vzorky do složky, roztříděné jako záložky.
 - **Piano Roll.** Vybraný vzorek hraje z MIDI: one-shoty chromaticky (nota 60 = původní výška), loopy spouští nota.
-- **Tempo.** Plugin pozná tempo a tóninu samplu a čte tempo projektu. Tlačítka ×2 / ÷2 opraví dvojnásobné nebo poloviční tempo, BPM jde i ručně napsat.
+- **Tempo a tónina.** Tempo z bicích, tónina z melodie a basy; tempo projektu z DAW; ×2 / ÷2 a ruční BPM.
 
 Design odpovídá webu trapwin.com (šablona *TrapWin Chrome*): pozadí #04060A, chromový gradient, modrá záře #9FC3FF, písma Archivo a IBM Plex Mono.
 
@@ -33,6 +38,10 @@ Stejné secrets jako u ostatních TrapWin pluginů (např. TrapWin Effector). Vl
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | nebo notarizace přes Apple ID a app-specific heslo |
 
 Bez nich se Mac verze postaví nepodepsaná (ZIP s koncovkou `-UNSIGNED` a návodem, jak ji otevřít).
+
+### Model pro stopy
+
+CI ho při buildu stáhne (`deezer/spleeter` release v1.4.0, 4stems) a převede skriptem `tools/export_spleeter.py` na `spleeter4.bin` (78 MB, f16). Windows instalátor ho dá do `C:\ProgramData\TrapWin\TrapWin Sampler\`, na Macu je v `Contents/Resources` každého balíčku. Bez modelu plugin funguje dál, jen bez stop (rozbor celého mixu).
 
 ## Build
 

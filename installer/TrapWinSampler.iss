@@ -43,6 +43,8 @@ Name: "standalone"; Description: "Standalone application"; Types: full
 [Files]
 Source: "{#SourceDir}\TrapWin Sampler.vst3\*"; DestDir: "{commoncf64}\VST3\TrapWin Sampler.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\TrapWin Sampler.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
+; stem separation model, shared by the VST3 and the standalone app
+Source: "{#SourceDir}\spleeter4.bin"; DestDir: "{commonappdata}\TrapWin\TrapWin Sampler"; Flags: ignoreversion
 Source: "..\EULA.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\packaging\INSTALL - Windows.txt"; DestDir: "{app}"; DestName: "Read me.txt"; Flags: ignoreversion
