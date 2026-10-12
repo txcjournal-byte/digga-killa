@@ -121,6 +121,34 @@ bool Engine::hasStemModel() const
     return stems::Separator::findModelFile().existsAsFile();
 }
 
+std::function<AudioPtr()> Engine::pitchedSource (int id) const
+{
+    const auto* item = find (id);
+    if (item == nullptr || item->kind != ClipKind::loop || item->plan == nullptr || songStems == nullptr)
+        return {};
+
+    // drums never become notes; vocals only when nothing else plays
+    auto mix = item->stemMix();
+    mix[(size_t) stems::drums] = 0.0f;
+    if (mix[(size_t) stems::other] > 0.0f || mix[(size_t) stems::bass] > 0.0f)
+        mix[(size_t) stems::vocals] = 0.0f;
+    if (mix == item->stemMix() || (mix[0] + mix[1] + mix[2] + mix[3]) <= 0.0f)
+        return {};
+
+    auto edit = item->edit;
+    edit.stems = EditSettings().stems;   // the stem mix is applied above
+    edit.fx = {};                        // effects never change the notes
+
+    return [plan = item->plan, songStems = songStems, mix, edit, rate = sampleRate,
+            sourceBpm = analysisResult.bpm, bpm = generatedBpm]() -> AudioPtr
+    {
+        const auto base = renderStemLoop (*plan, *songStems, mix, rate, sourceBpm, bpm);
+        if (edit.isDefault())
+            return std::make_shared<const juce::AudioBuffer<float>> (base);
+        return std::make_shared<const juce::AudioBuffer<float>> (renderEdit (base, edit, rate, bpm, true, false));
+    };
+}
+
 void Engine::sourceReady (AudioPtr audio, double rate)
 {
     onMessageThread (this, [audio, rate] (Engine& e)

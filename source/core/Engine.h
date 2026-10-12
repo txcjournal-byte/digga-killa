@@ -11,6 +11,7 @@
 #include <juce_events/juce_events.h>
 
 #include <atomic>
+#include <functional>
 #include <map>
 
 namespace digga
@@ -86,6 +87,13 @@ public:
     double getSourceSeconds() const noexcept { return source != nullptr ? source->getNumSamples() / sampleRate : 0.0; }
     AudioPtr getSource() const noexcept { return source; }
     bool hasStemModel() const;
+
+    /** For audio-to-MIDI: builds a loop's pitched part only (melody + 808, no
+        drums or vocals, or the vocals alone for a vocal-only mix) with the same
+        crop, tempo and pitch as the clip. Safe to call on any thread once
+        returned; empty when the clip has nothing to separate (one-shots,
+        no stems), meaning: transcribe the clip itself. */
+    std::function<AudioPtr()> pitchedSource (int id) const;
 
 private:
     void startAnalysis();

@@ -67,7 +67,7 @@ juce::File writeToTempFile (const std::vector<Note>& notes, const ExportOptions&
     return file;
 }
 
-std::shared_future<TranscriptionCache::NotesPtr> TranscriptionCache::start (const AudioPtr& audio, double sampleRate)
+std::shared_future<TranscriptionCache::NotesPtr> TranscriptionCache::start (const AudioPtr& audio, double sampleRate, SourceMaker maker)
 {
     // caller holds the lock
     for (auto it = entries.begin(); it != entries.end();)
@@ -78,22 +78,25 @@ std::shared_future<TranscriptionCache::NotesPtr> TranscriptionCache::start (cons
         return entry.result;
 
     entry.audio = audio;
-    entry.result = std::async (std::launch::async, [audio, sampleRate]
+    entry.result = std::async (std::launch::async, [audio, sampleRate, maker = std::move (maker)]
     {
-        return std::make_shared<const std::vector<Note>> (transcribe (*audio, sampleRate));
+        AudioPtr source = maker ? maker() : AudioPtr();
+        if (source == nullptr || source->getNumSamples() == 0)
+            source = audio;
+        return std::make_shared<const std::vector<Note>> (transcribe (*source, sampleRate));
     }).share();
     return entry.result;
 }
 
-void TranscriptionCache::prefetch (const AudioPtr& audio, double sampleRate)
+void TranscriptionCache::prefetch (const AudioPtr& audio, double sampleRate, SourceMaker maker)
 {
     if (audio == nullptr)
         return;
     const std::lock_guard<std::mutex> sl (lock);
-    start (audio, sampleRate);
+    start (audio, sampleRate, std::move (maker));
 }
 
-TranscriptionCache::NotesPtr TranscriptionCache::get (const AudioPtr& audio, double sampleRate)
+TranscriptionCache::NotesPtr TranscriptionCache::get (const AudioPtr& audio, double sampleRate, SourceMaker maker)
 {
     if (audio == nullptr)
         return {};
@@ -101,12 +104,12 @@ TranscriptionCache::NotesPtr TranscriptionCache::get (const AudioPtr& audio, dou
     std::shared_future<NotesPtr> result;
     {
         const std::lock_guard<std::mutex> sl (lock);
-        result = start (audio, sampleRate);
+        result = start (audio, sampleRate, std::move (maker));
     }
     return result.get();
 }
 
-TranscriptionCache::NotesPtr TranscriptionCache::tryGet (const AudioPtr& audio, double sampleRate)
+TranscriptionCache::NotesPtr TranscriptionCache::tryGet (const AudioPtr& audio, double sampleRate, SourceMaker maker)
 {
     if (audio == nullptr)
         return {};
@@ -114,7 +117,7 @@ TranscriptionCache::NotesPtr TranscriptionCache::tryGet (const AudioPtr& audio, 
     std::shared_future<NotesPtr> result;
     {
         const std::lock_guard<std::mutex> sl (lock);
-        result = start (audio, sampleRate);
+        result = start (audio, sampleRate, std::move (maker));
     }
     return result.wait_for (std::chrono::seconds (0)) == std::future_status::ready ? result.get() : NotesPtr {};
 }

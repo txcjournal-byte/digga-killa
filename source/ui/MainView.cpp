@@ -216,7 +216,7 @@ void MainView::updateMidiView()
     if (item->dry == shreddedAudio)
         return;
 
-    if (const auto notes = transcriptions.tryGet (item->dry, engine.getSampleRate()))
+    if (const auto notes = transcriptions.tryGet (item->dry, engine.getSampleRate(), engine.pitchedSource (item->id)))
     {
         shreddedAudio = item->dry;
         midiEdited = false;
@@ -327,7 +327,7 @@ void MainView::prefetchMidi()
         return;
     const auto& engine = processor.getEngine();
     if (const auto* item = engine.find (engine.getSelected()))
-        transcriptions.prefetch (item->dry, engine.getSampleRate());
+        transcriptions.prefetch (item->dry, engine.getSampleRate(), engine.pitchedSource (item->id));
 }
 
 void MainView::dragOut (int id)
@@ -354,7 +354,7 @@ void MainView::dragOut (int id)
         // the notes as edited in the shredder, else a fresh transcription
         if (item->dry == shreddedAudio && ! editor.getMidiView().getNotes().empty())
             file = midi::writeToTempFile (editor.getMidiView().getNotes(), options, fileName);
-        else if (const auto notes = transcriptions.get (item->dry, engine.getSampleRate()))
+        else if (const auto notes = transcriptions.get (item->dry, engine.getSampleRate(), engine.pitchedSource (item->id)))
             file = midi::writeToTempFile (*notes, options, fileName);
     }
     else

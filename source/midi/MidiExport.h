@@ -5,6 +5,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <functional>
 #include <future>
 #include <map>
 #include <mutex>
@@ -31,15 +32,19 @@ class TranscriptionCache
 {
 public:
     using NotesPtr = std::shared_ptr<const std::vector<Note>>;
+    /** Optional: builds the audio that is really transcribed for a clip (e.g.
+        the loop without drums and vocals). Runs in the background; returning
+        null falls back to the clip itself. Results are keyed by the clip. */
+    using SourceMaker = std::function<AudioPtr()>;
 
     /** Starts transcribing in the background if not done / running yet. */
-    void prefetch (const AudioPtr& audio, double sampleRate);
+    void prefetch (const AudioPtr& audio, double sampleRate, SourceMaker maker = {});
 
     /** Result for this clip, computing it now if needed (blocks). */
-    NotesPtr get (const AudioPtr& audio, double sampleRate);
+    NotesPtr get (const AudioPtr& audio, double sampleRate, SourceMaker maker = {});
 
     /** Result if it is ready, else null (starts it when needed; never blocks). */
-    NotesPtr tryGet (const AudioPtr& audio, double sampleRate);
+    NotesPtr tryGet (const AudioPtr& audio, double sampleRate, SourceMaker maker = {});
 
 private:
     struct Entry
@@ -48,7 +53,7 @@ private:
         std::shared_future<NotesPtr> result;
     };
 
-    std::shared_future<NotesPtr> start (const AudioPtr& audio, double sampleRate);
+    std::shared_future<NotesPtr> start (const AudioPtr& audio, double sampleRate, SourceMaker maker);
 
     std::mutex lock;
     std::map<const void*, Entry> entries;
