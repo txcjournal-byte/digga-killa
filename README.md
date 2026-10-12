@@ -7,11 +7,11 @@ VST3 / AU nástroj (Windows a Mac) pro trapové producenty. Přetáhneš na viny
 - **Loopy jednotlivých stop.** Ke každému songu i *Drop Drums*, *Intro Melody*, *Hook Vox*, *Drop 808* … z částí, kde daná stopa nejvíc hraje.
 - **One-shoty, nic náhodného.** Každý zvuk je vyříznutý ze své stopy, takže pod ním nic nehraje: *Kick, Snare, Hat, Open Hat, Perc* z bicích, *808 F#1* s tónem z basy, *Note* a *Chord* z melodie (Basic Pitch), *Vox* chopy z vokálu. Vybírá nejčistší kusy a končí před dalším úderem.
 - **Prohlížeč po záložkách:** LOOPS · DRUMS · 808 & BASS · MELODY · VOCALS.
-- **Přehled songu.** Celý song s pruhy stop a pojmenovanými částmi; ukáže, odkud vybraný vzorek je. Klik = přehraje song od toho místa.
 - **Profesionální editor vlny.** Zoom kolečkem / gestem / tlačítky až na jednotlivé vzorky, posouvání, mřížka taktů, značky začátku a konce kamkoliv (přichytávání: vypnuto, průchod nulou, 1/16, 1/8, doba, takt; Alt = bez přichytávání, Shift = jemně) a značka LOOP START, odkud smyčka začíná hrát.
 - **MIDI skartovačka.** Záložka MIDI SHRED převede vzorek na noty (Basic Pitch, i akordy) a ukáže je v piano rollu: posun, délka, mazání, kreslení, kvantizace, oktávy, velocity, undo – a DRAG MIDI rovnou do piano rollu DAW.
-- **FX rack (z TrapWin Effectoru).** Filter, drive, crush, gate/stutter sekvencer, tape stop, delay, reverb, width a tlačítko KILL (náhodný hudební rack). Do DAW přetáhneš zvuk RAW (bez efektů) nebo s FX.
-- **Editor + mixér stop.** Ořez (po dobách), fade in/out, hlasitost, ladění ±12, reverse, reset – a u loopů mixér stop (VOX / DRUMS / 808 / MELODY, mute / solo): z full loopu uděláš třeba instrumentál nebo jen melodii.
+- **Efekty – jednoduše:** HALFTIME / SPEED (½, ¼, 2×), REPEAT stutter (1/2 … 1/32), filtr (jeden knoflík LP ↔ HP), delay, reverb a KILL (náhodná kombinace). Do DAW přetáhneš zvuk RAW (bez efektů) nebo s FX.
+- **Stopy u loopu.** Přepínače VOX / DRUMS / 808 / MELODY: z full loopu uděláš instrumentál, loop bez beatu nebo jen melodii.
+- **Velikost okna.** Otevře se zhruba na 70 % obrazovky (notebook i monitor), dá se zvětšit / zmenšit, vše zůstává čitelné.
 - **Přetažení do DAW kdykoli.** Řádek nebo *DRAG TO DAW* do FL Studia, Abletonu, Logicu…, jako WAV nebo MIDI (Basic Pitch, i akordy).
 - **EXPORT ALL** uloží všechny vzorky do složky, roztříděné jako záložky.
 - **Piano Roll.** Vybraný vzorek hraje z MIDI: one-shoty chromaticky (nota 60 = původní výška), loopy spouští nota.
