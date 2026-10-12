@@ -57,7 +57,8 @@ void TrapWinLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b,
     g.setColour (colour.withMultipliedAlpha (b.isEnabled() ? 1.0f : 0.4f));
     const float h = juce::jmin (15.0f, b.getHeight() * 0.42f);
     g.setFont (chrome ? display (h).withExtraKerningFactor (0.04f) : mono (h * 0.9f, true).withExtraKerningFactor (0.14f));
-    g.drawText (b.getButtonText().toUpperCase(), b.getLocalBounds().reduced (6, 0), juce::Justification::centred, false);
+    // shrink rather than cut off a label that does not fit
+    g.drawFittedText (b.getButtonText().toUpperCase(), b.getLocalBounds().reduced (6, 0), juce::Justification::centred, 1, 0.7f);
 }
 
 void TrapWinLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool down)

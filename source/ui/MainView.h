@@ -4,8 +4,6 @@
 #include "ui/EditorPanel.h"
 #include "ui/Header.h"
 #include "ui/SampleList.h"
-#include "ui/SongOverview.h"
-#include "ui/StemMixer.h"
 #include "ui/Vinyl.h"
 
 namespace digga
@@ -14,15 +12,14 @@ namespace digga
 class TrapWinProcessor;
 
 /** The whole UI at a fixed logical size; the plugin window scales it.
-    Vinyl left, the sample browser right, the song overview (stems and
-    sections) below, then the editor with its stem mixer (trapwin.com style). */
+    Vinyl left, the sample browser right, the editor below (trapwin.com style). */
 class MainView : public juce::Component,
                  private juce::ChangeListener,
                  private juce::Timer
 {
 public:
-    static constexpr int logicalWidth = 1440;
-    static constexpr int logicalHeight = 900;
+    static constexpr int logicalWidth = 1200;
+    static constexpr int logicalHeight = 750;
 
     explicit MainView (TrapWinProcessor& processor);
     ~MainView() override;
@@ -40,7 +37,6 @@ private:
     void dragOut (int id);
     void prefetchMidi();
     void exportAll();
-    void refreshOverview();
     void updateMidiView();
 
     TrapWinProcessor& processor;
@@ -50,11 +46,7 @@ private:
     Vinyl vinyl;
     SampleList list;
     EditorPanel editor;
-    SongOverview overview;
-    StemMixer mixer;
     std::unique_ptr<juce::FileChooser> chooser;
-    const void* shownStems = nullptr;
-    size_t shownSections = 0;
     AudioPtr shreddedAudio;          // clip whose notes the MIDI view shows
     bool midiEdited = false;         // the user changed the shredded notes
     juce::TooltipWindow tooltips { this, 700 };

@@ -151,6 +151,27 @@ EditorPanel::EditorPanel()
         addAndMakeVisible (sl);
     }
 
+    // stems of a loop: on / off (vocals, drums, 808 / bass, melody)
+    static const char* const stemText[] = { "Vox", "Drums", "808", "Melody" };
+    for (size_t i = 0; i < stemButtons.size(); ++i)
+    {
+        auto& b = stemButtons[i];
+        b.setButtonText (stemText[i]);
+        b.setTooltip ("Turn this stem of the loop on / off (e.g. drums off = instrumental without beat)");
+        b.onClick = [this, i]
+        {
+            if (! canMixStems || id < 0)
+                return;
+            stemLevels[i] = stemLevels[i] > 0.0f ? 0.0f : 1.0f;
+            if (std::all_of (stemLevels.begin(), stemLevels.end(), [] (float v) { return v <= 0.0f; }))
+                stemLevels[i] = 1.0f;   // never mute everything
+            syncStems();
+            if (onStemMix)
+                onStemMix (id, stemLevels);
+        };
+        addAndMakeVisible (b);
+    }
+
     updateSnapButton();
     setItem (nullptr, 44100.0, 120.0);
     setView (View::wave);
@@ -203,6 +224,8 @@ void EditorPanel::setItem (const SampleItem* item, double rate, double newBpm)
             if (! sameItem)
                 wave.zoomToFit();
         }
+        canMixStems = item->canMixStems();
+        stemLevels = item->stemMix();
         wave.setRange (edit.start, edit.end);
         wave.setLoopStart (edit.loopStart);
         fxRack.setSettings (edit.fx);
@@ -212,6 +235,7 @@ void EditorPanel::setItem (const SampleItem* item, double rate, double newBpm)
     {
         title = {};
         edit = {};
+        canMixStems = false;
         shownAudio = nullptr;
         wave.setAudio (nullptr, rate);
         fxRack.setSettings ({});
@@ -224,7 +248,28 @@ void EditorPanel::setItem (const SampleItem* item, double rate, double newBpm)
     for (auto& s : sliders)
         s.slider.setEnabled (item != nullptr);
     syncControls();
+    syncStems();
     repaint();
+}
+
+void EditorPanel::setStems (bool available, const std::array<bool, 4>& present)
+{
+    stemsAvailable = available;
+    stemsPresent = present;
+    syncStems();
+}
+
+void EditorPanel::syncStems()
+{
+    for (size_t i = 0; i < stemButtons.size(); ++i)
+    {
+        auto& b = stemButtons[i];
+        const bool usable = canMixStems && stemsAvailable && stemsPresent[i];
+        b.setEnabled (usable);
+        b.getProperties().set ("chrome", usable && stemLevels[i] > 0.0f);
+        b.repaint();
+    }
+    layoutView();
 }
 
 void EditorPanel::syncControls()
@@ -270,7 +315,7 @@ void EditorPanel::setPlayback (bool isPlaying, float p)
 
 void EditorPanel::resized()
 {
-    auto r = getLocalBounds().reduced (22, 16);
+    auto r = getLocalBounds().reduced (20, 14);
 
     headerArea = r.removeFromTop (44);
     auto top = headerArea;
@@ -286,11 +331,11 @@ void EditorPanel::resized()
     top.removeFromRight (8);
     play.setBounds (top.removeFromRight (80).withSizeKeepingCentre (80, 34));
 
-    r.removeFromTop (10);
-    auto tabs = r.removeFromTop (30);
+    r.removeFromTop (8);
+    auto tabs = r.removeFromTop (32);
     waveTab.setBounds (tabs.removeFromLeft (92));
     tabs.removeFromLeft (8);
-    midiTab.setBounds (tabs.removeFromLeft (128));
+    midiTab.setBounds (tabs.removeFromLeft (92));
     tabs.removeFromLeft (8);
     fxTab.setBounds (tabs.removeFromLeft (80));
 
@@ -304,7 +349,7 @@ void EditorPanel::resized()
     tabs.removeFromRight (6);
     zoomOut.setBounds (tabs.removeFromRight (36));
 
-    r.removeFromTop (10);
+    r.removeFromTop (8);
     mainArea = r;
     layoutView();
 }
@@ -317,17 +362,31 @@ void EditorPanel::layoutView()
         c->setVisible (showWave);
     for (auto& s : sliders)
         s.slider.setVisible (showWave);
+    const bool showStems = showWave && canMixStems && stemsAvailable;
+    for (auto& b : stemButtons)
+        b.setVisible (showStems);
     wave.setVisible (showWave);
     midiView.setVisible (view == View::midi);
     fxRack.setVisible (view == View::fx);
 
     if (showWave)
     {
-        controlsArea = r.removeFromBottom (44);
+        controlsArea = r.removeFromBottom (46);
         r.removeFromBottom (10);
         wave.setBounds (r);
 
         auto controls = controlsArea;
+        stemsArea = {};
+        if (showStems)
+        {
+            // stem toggles on the right of the sliders
+            stemsArea = controls.removeFromRight (430);
+            controls.removeFromRight (16);
+            auto buttons = stemsArea.withTrimmedLeft (70).withTrimmedTop (14);
+            const int bw = buttons.getWidth() / 4;
+            for (auto& b : stemButtons)
+                b.setBounds (buttons.removeFromLeft (bw).reduced (3, 0));
+        }
         const int w = controls.getWidth() / (int) sliders.size();
         for (size_t i = 0; i < sliders.size(); ++i)
         {
@@ -365,7 +424,7 @@ void EditorPanel::paint (juce::Graphics& g)
         juce::String info = detail + dot + "edit " + juce::String (seconds, 2) + " s";
         if (edit.fx.anyOn())
             info << dot << "fx on";
-        drawMonoLabel (g, info, label, juce::Justification::topLeft, muted, 10.0f);
+        drawMonoLabel (g, info, label, juce::Justification::topLeft, text2.withAlpha (0.75f), 11.0f);
 
     }
 
@@ -373,12 +432,16 @@ void EditorPanel::paint (juce::Graphics& g)
     if (view == View::wave)
         for (auto& s : sliders)
         {
-            const auto b = s.slider.getBounds().toFloat().translated (0.0f, -18.0f).withHeight (16.0f);
-            drawMonoLabel (g, s.label, b, juce::Justification::centredLeft, muted, 10.0f);
+            const auto b = s.slider.getBounds().toFloat().translated (0.0f, -20.0f).withHeight (18.0f);
+            drawMonoLabel (g, s.label, b, juce::Justification::centredLeft, muted, 11.0f);
             g.setColour (text);
-            g.setFont (mono (11.0f, true));
+            g.setFont (mono (12.5f, true));
             g.drawText (s.format (s.slider.getValue()), b, juce::Justification::centredRight, false);
         }
+
+    if (view == View::wave && ! stemsArea.isEmpty())
+        drawMonoLabel (g, "Stems", stemsArea.toFloat().withTrimmedTop (14.0f).withWidth (66.0f),
+                       juce::Justification::centredLeft, muted, 11.0f);
 }
 
 } // namespace digga

@@ -43,8 +43,9 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
 void drawMonoLabel (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> area,
                     juce::Justification j, juce::Colour colour, float height)
 {
+    // never smaller than this: the window is often scaled down on laptops
     g.setColour (colour);
-    g.setFont (mono (height, true).withExtraKerningFactor (0.16f));
+    g.setFont (mono (juce::jmax (11.0f, height), true).withExtraKerningFactor (0.12f));
     g.drawText (s.toUpperCase(), area, j, false);
 }
 

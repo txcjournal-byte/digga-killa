@@ -83,8 +83,6 @@ target_sources(TrapWinSampler PRIVATE
     source/ui/Header.cpp
     source/ui/Vinyl.cpp
     source/ui/SampleList.cpp
-    source/ui/SongOverview.cpp
-    source/ui/StemMixer.cpp
     source/ui/WaveformEditor.cpp
     source/ui/MidiView.cpp
     source/ui/FxRack.cpp

@@ -75,7 +75,7 @@ void Header::resized()
 void Header::paint (juce::Graphics& g)
 {
     // the TrapWin logo exactly as on the other plugins, product pill beside it
-    const auto logoArea = wordmarkArea.withSizeKeepingCentre (wordmarkArea.getWidth(), 80.0f).withWidth (220.0f);
+    const auto logoArea = wordmarkArea.withSizeKeepingCentre (wordmarkArea.getWidth(), 64.0f).withWidth (176.0f);
     drawLogo (g, logoArea, juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
 
     const auto pill = juce::Rectangle<float> (logoArea.getRight() + 12.0f, logoArea.getCentreY() - 13.0f, 112.0f, 26.0f);

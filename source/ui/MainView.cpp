@@ -9,7 +9,7 @@ namespace digga
 MainView::MainView (TrapWinProcessor& p) : processor (p)
 {
     setOpaque (true);
-    for (auto* c : std::initializer_list<juce::Component*> { &header, &vinyl, &list, &editor, &overview, &mixer })
+    for (auto* c : std::initializer_list<juce::Component*> { &header, &vinyl, &list, &editor })
         addAndMakeVisible (c);
 
     auto& engine = processor.getEngine();
@@ -21,17 +21,14 @@ MainView::MainView (TrapWinProcessor& p) : processor (p)
     header.format.onChange = [this] (bool midi) { processor.setDragAsMidi (midi); prefetchMidi(); };
     header.onExportAll = [this] { exportAll(); };
 
-    overview.onSeek = [this] (float fraction) { processor.getPlayer().requestStartAt (fraction); };
-    mixer.onChange = [this] (const std::array<float, 4>& levels)
+    editor.onStemMix = [this] (int id, const std::array<float, 4>& levels)
     {
         auto& e = processor.getEngine();
-        if (const auto* item = e.find (e.getSelected()))
+        if (const auto* item = e.find (id))
         {
             auto edit = item->edit;
-            edit.stems = levels;
-            if (levels == item->baseMix)
-                edit.stems = EditSettings().stems;
-            e.setEdit (item->id, edit);
+            edit.stems = levels == item->baseMix ? EditSettings().stems : levels;
+            e.setEdit (id, edit);
         }
     };
 
@@ -119,12 +116,10 @@ void MainView::paint (juce::Graphics& g)
 
 void MainView::resized()
 {
-    header.setBounds (0, 0, logicalWidth, 80);
-    vinyl.setBounds (24, 86, 300, 300);
-    list.setBounds (336, 86, 1080, 300);
-    overview.setBounds (24, 396, 1392, 92);
-    editor.setBounds (24, 498, 1128, 390);
-    mixer.setBounds (1164, 498, 252, 390);
+    header.setBounds (0, 0, logicalWidth, 70);
+    vinyl.setBounds (20, 76, 268, 276);
+    list.setBounds (300, 76, 880, 276);
+    editor.setBounds (20, 364, 1160, 366);
 }
 
 void MainView::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -190,79 +185,16 @@ void MainView::refresh()
         shownSelection = engine.getSelected();
     }
 
-    refreshOverview();
-
-    // stem mixer: loops only, and only with stems
-    const auto* selected = engine.find (engine.getSelected());
+    // stem toggles of the editor: loops only, and only with stems
     const auto songStems = engine.getStems();
     std::array<bool, 4> present {};
     if (songStems != nullptr)
         for (int st = 0; st < 4; ++st)
             present[(size_t) st] = songStems->present[(size_t) st];
-    if (selected != nullptr && selected->canMixStems())
-        mixer.setState (true, selected->stemMix(), present, {});
-    else
-        mixer.setState (false, { 0.0f, 0.0f, 0.0f, 0.0f }, present,
-                        songStems == nullptr ? (engine.getPhase() == Engine::Phase::ready && ! engine.hasStemModel() ? "Stem model missing - reinstall" : "Stems appear with a song")
-                                             : "Stem mix works on loops");
+    editor.setStems (songStems != nullptr, present);
 
     editor.setItem (engine.find (engine.getSelected()), rate, engine.getProjectBpm());
     updateMidiView();
-}
-
-void MainView::refreshOverview()
-{
-    const auto& engine = processor.getEngine();
-    const auto songStems = engine.getStems();
-    const double length = engine.getSourceSeconds();
-
-    if (songStems.get() != shownStems || engine.getSections().size() != shownSections
-        || (engine.getOverview().empty() != (length <= 0.0)))
-    {
-        shownStems = songStems.get();
-        shownSections = engine.getSections().size();
-
-        std::array<std::vector<float>, 4> lanes;
-        std::array<bool, 4> present {};
-        if (songStems != nullptr)
-            for (int st = 0; st < 4; ++st)
-            {
-                lanes[(size_t) st] = songStems->overview[(size_t) st];
-                present[(size_t) st] = songStems->present[(size_t) st];
-            }
-
-        std::vector<SongOverview::SectionView> views;
-        if (const auto* a = engine.getAnalysis())
-            for (const auto& sec : engine.getSections())
-                views.push_back ({ sec.name, a->downbeatSeconds + sec.startBar * a->barSeconds(),
-                                   juce::jmin (length, a->downbeatSeconds + (sec.startBar + sec.numBars) * a->barSeconds()) });
-        overview.setSong (length, engine.getOverview(), lanes, present, views);
-    }
-
-    overview.setPlaceholder (engine.getPhase() == Engine::Phase::analysing ? engine.getStatusDetail() : juce::String ("Drop a song on the vinyl"));
-
-    // where the selected sample comes from
-    const auto* item = engine.find (engine.getSelected());
-    const auto* a = engine.getAnalysis();
-    if (item != nullptr && a != nullptr)
-    {
-        int stem = -1;
-        const auto mix = item->stemMix();
-        if (std::count_if (mix.begin(), mix.end(), [] (float v) { return v > 0.0f; }) == 1)
-            stem = (int) (std::find_if (mix.begin(), mix.end(), [] (float v) { return v > 0.0f; }) - mix.begin());
-        else if (item->group == "Drums") stem = stems::drums;
-        else if (item->group == "Bass") stem = stems::bass;
-        else if (item->group == "Melody") stem = stems::other;
-        else if (item->group == "Vocals") stem = stems::vocals;
-        if (item->kind == ClipKind::loop && item->group == "Loops" && ! item->edit.hasStemMix())
-            stem = -1;
-
-        const double end = item->kind == ClipKind::loop ? item->sourceSeconds + item->bars * a->barSeconds()
-                                                        : item->sourceSeconds + juce::jmax (0.15, item->lengthSeconds (engine.getSampleRate()));
-        overview.setSelection (item->sourceSeconds, end, stem);
-    }
-    else
-        overview.setSelection (-1.0, -1.0, -1);
 }
 
 void MainView::updateMidiView()
@@ -343,7 +275,6 @@ void MainView::timerCallback()
     vinyl.setPlayback (player.isPlaying(), player.getProgress());
     header.setProjectBpm (processor.getEngine().getProjectBpm());
 
-    overview.setPlayhead (player.isPlaying(), player.getProgress());
     if (editor.getView() == EditorPanel::View::midi && shreddedAudio == nullptr)
         updateMidiView();
     else if (editor.getView() == EditorPanel::View::midi)

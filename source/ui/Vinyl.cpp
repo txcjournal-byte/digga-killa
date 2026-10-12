@@ -16,7 +16,7 @@ Vinyl::Vinyl()
 juce::Rectangle<float> Vinyl::recordArea() const
 {
     auto r = getLocalBounds().toFloat().reduced (20.0f);
-    const float size = juce::jmin (r.getWidth(), r.getHeight() - 96.0f);
+    const float size = juce::jmin (r.getWidth(), r.getHeight() - 82.0f);
     return juce::Rectangle<float> (size, size).withCentre ({ r.getCentreX(), r.getY() + size * 0.5f });
 }
 
@@ -52,7 +52,7 @@ void Vinyl::timerCallback()
 
 void Vinyl::resized()
 {
-    play.setBounds (getLocalBounds().removeFromBottom (54).withSizeKeepingCentre (110, 34));
+    play.setBounds (getLocalBounds().removeFromBottom (44).withSizeKeepingCentre (100, 30));
 }
 
 void Vinyl::paint (juce::Graphics& g)
@@ -117,28 +117,28 @@ void Vinyl::paint (juce::Graphics& g)
     }
 
     // text block under the record
-    auto textArea = getLocalBounds().toFloat().withTop (rec.getBottom() + 14.0f).reduced (16.0f, 0.0f);
+    auto textArea = getLocalBounds().toFloat().withTop (rec.getBottom() + 10.0f).reduced (14.0f, 0.0f);
     if (status == SampleStore::Status::ready)
-        textArea.removeFromBottom (54.0f);
+        textArea.removeFromBottom (44.0f);
 
-    auto title = textArea.removeFromTop (30.0f);
-    auto sub = textArea.removeFromTop (20.0f);
+    auto title = textArea.removeFromTop (26.0f);
+    auto sub = textArea.removeFromTop (18.0f);
     const juce::String dot (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
 
     switch (status)
     {
         case SampleStore::Status::empty:
-            fillChrome (g, textPath ("DROP A SONG", display (40.0f), title, juce::Justification::centred), true);
+            fillChrome (g, textPath ("DROP A SONG", display (30.0f), title, juce::Justification::centred), true);
             drawMonoLabel (g, "WAV" + dot + "MP3" + dot + "AIFF" + dot + "FLAC" + dot + "or click", sub, juce::Justification::centred, muted);
             break;
 
         case SampleStore::Status::loading:
-            fillChrome (g, textPath ("ANALYSING", display (40.0f), title, juce::Justification::centred), true);
+            fillChrome (g, textPath ("ANALYSING", display (30.0f), title, juce::Justification::centred), true);
             drawMonoLabel (g, detail.isNotEmpty() ? detail : "Decoding " + info.file.getFileName(), sub, juce::Justification::centred, accentL);
             break;
 
         case SampleStore::Status::error:
-            fillChrome (g, textPath ("CAN'T READ", display (40.0f), title, juce::Justification::centred), true);
+            fillChrome (g, textPath ("CAN'T READ", display (30.0f), title, juce::Justification::centred), true);
             drawMonoLabel (g, info.error, sub, juce::Justification::centred, juce::Colour (0xffff7a7a));
             break;
 

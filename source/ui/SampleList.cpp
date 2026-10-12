@@ -68,7 +68,7 @@ void SampleRow::paint (juce::Graphics& g)
 
     auto nameLine = textArea.removeFromTop (textArea.getHeight() * 0.55f);
     g.setColour (text);
-    g.setFont (bold (16.5f));
+    g.setFont (bold (17.5f));
     g.drawFittedText (model.name.toUpperCase(), nameLine.toNearestInt(), juce::Justification::bottomLeft, 1, 0.8f);
     if (model.edited)
     {
@@ -76,14 +76,14 @@ void SampleRow::paint (juce::Graphics& g)
         g.setColour (accentL);
         g.fillEllipse (nameLine.getX() + juce::jmin (w, nameLine.getWidth()) + 6.0f, nameLine.getBottom() - 11.0f, 6.0f, 6.0f);
     }
-    drawMonoLabel (g, model.detail, textArea.withTrimmedTop (2.0f), juce::Justification::topLeft, muted, 10.5f);
+    drawMonoLabel (g, model.detail, textArea.withTrimmedTop (2.0f), juce::Justification::topLeft, text2.withAlpha (0.8f), 11.5f);
 
     const auto colour = model.stem >= 0 ? stemColours[model.stem] : accentL;
     drawWaveform (g, model.peaks, wave, selected ? colour : colour.withMultipliedBrightness (0.8f),
                   colour.darker (selected ? 0.5f : 0.8f));
 
     g.setColour (text2);
-    g.setFont (mono (12.0f));
+    g.setFont (mono (13.0f, true));
     g.drawText (model.length, length, juce::Justification::centred, false);
 
     g.setColour (hover || selected ? text2 : muted.withAlpha (0.7f));

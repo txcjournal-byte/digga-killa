@@ -42,6 +42,8 @@ public:
     /** nullptr shows the empty state. */
     void setItem (const SampleItem* item, double sampleRate, double bpm);
     void setPlayback (bool isPlaying, float progress);
+    /** Which stems the song has (stem toggles for loops). */
+    void setStems (bool available, const std::array<bool, 4>& present);
 
     View getView() const noexcept { return view; }
     void setView (View v);
@@ -52,6 +54,7 @@ public:
     std::function<void (int id)> onPlay, onDragOut;
     std::function<void (int id, double fraction)> onAudition;   // click on the wave
     std::function<void (View)> onViewChanged;
+    std::function<void (int id, const std::array<float, 4>& levels)> onStemMix;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -61,6 +64,7 @@ private:
     void syncControls();
     void updateSnapButton();
     void layoutView();
+    void syncStems();
 
     struct LabelledSlider
     {
@@ -77,10 +81,15 @@ private:
     float progress = 0.0f;
     View view = View::wave;
     AudioPtr shownAudio;
+    bool canMixStems = false, stemsAvailable = false;
+    std::array<bool, 4> stemsPresent {};
+    std::array<float, 4> stemLevels { 1.0f, 1.0f, 1.0f, 1.0f };
+    std::array<juce::TextButton, 4> stemButtons;
+    juce::Rectangle<int> stemsArea;
 
     juce::Rectangle<int> mainArea, controlsArea, headerArea;
     juce::TextButton play { "Play" }, reverse { "Reverse" }, reset { "Reset" };
-    juce::TextButton waveTab { "Wave" }, midiTab { "MIDI shred" }, fxTab { "FX" };
+    juce::TextButton waveTab { "Wave" }, midiTab { "MIDI" }, fxTab { "FX" };
     juce::TextButton zoomOut { "-" }, zoomIn { "+" }, zoomFit { "Fit" }, zoomSel { "Sel" }, snapButton;
     juce::TextButton dragRaw { "Raw" }, dragFx { "FX" };
     DragPill drag;
