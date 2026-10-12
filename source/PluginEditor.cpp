@@ -27,18 +27,18 @@ int TrapWinEditor::initialWidth (int savedWidth)
     constexpr double aspect = (double) MainView::logicalWidth / (double) MainView::logicalHeight;
     constexpr int minWidth = MainView::logicalWidth * 6 / 10;
 
-    // Open as a window inside the DAW, never over all of it: about 70 % of the
-    // screen width and 80 % of its height (laptop 1366x768 -> ~950 px wide,
-    // full HD -> ~1340 px), never bigger than 115 % of the design size.
-    // Windows display scaling is already applied to userArea.
+    // Open as a window inside the DAW, never over all of it. Some hosts (FL Studio
+    // on a scaled Windows display) apply the display scale on top of the logical
+    // size, so the first guess is deliberately modest (about 55 % of the width and
+    // 62 % of the height); fitToScreen() then checks the real on-screen size.
     auto area = juce::Rectangle<int> (1920, 1040);
     if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
         area = display->userArea;
 
-    const int fitWidth = juce::jmin ((int) (area.getWidth() * 0.70), (int) (area.getHeight() * 0.80 * aspect),
-                                     MainView::logicalWidth * 115 / 100);
+    const int fitWidth = juce::jmin ((int) (area.getWidth() * 0.55), (int) (area.getHeight() * 0.62 * aspect),
+                                     MainView::logicalWidth);
     // a size the user chose is kept, as long as it still fits this screen
-    const int wanted = savedWidth > 0 ? juce::jmin (savedWidth, (int) (area.getHeight() * 0.92 * aspect), area.getWidth() - 40)
+    const int wanted = savedWidth > 0 ? juce::jmin (savedWidth, (int) (area.getHeight() * 0.80 * aspect), area.getWidth() - 80)
                                       : fitWidth;
     return juce::jmax (minWidth, wanted);
 }
@@ -51,6 +51,39 @@ TrapWinEditor::~TrapWinEditor()
 void TrapWinEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::bg);
+}
+
+void TrapWinEditor::parentHierarchyChanged()
+{
+    if (fittedToScreen || getPeer() == nullptr)
+        return;
+
+    fittedToScreen = true;
+    juce::Component::SafePointer<TrapWinEditor> safe (this);
+    juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->fitToScreen(); });
+}
+
+// Shrinks the window if, as actually shown by the host (including any scaling
+// the host adds), it is taller or wider than the screen it is on.
+void TrapWinEditor::fitToScreen()
+{
+    const auto onScreen = getScreenBounds();
+    if (onScreen.isEmpty())
+        return;
+
+    const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (onScreen);
+    if (display == nullptr)
+        return;
+
+    const auto area = display->userArea;
+    const double ratio = juce::jmin (area.getWidth() * 0.80 / onScreen.getWidth(),
+                                     area.getHeight() * 0.80 / onScreen.getHeight());
+    if (ratio >= 1.0)
+        return;
+
+    constexpr double aspect = (double) MainView::logicalWidth / (double) MainView::logicalHeight;
+    const int width = juce::jmax (MainView::logicalWidth * 6 / 10, (int) (getWidth() * ratio));
+    setSize (width, juce::roundToInt (width / aspect));
 }
 
 void TrapWinEditor::resized()

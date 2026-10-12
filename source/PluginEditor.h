@@ -15,12 +15,15 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void parentHierarchyChanged() override;
 
 private:
     static int initialWidth (int savedWidth);
+    void fitToScreen();
 
     TrapWinProcessor& processor;
     bool sizeReady = false;
+    bool fittedToScreen = false;
     TrapWinLookAndFeel lookAndFeel;
     MainView view;
 
