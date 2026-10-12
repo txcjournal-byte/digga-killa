@@ -86,6 +86,8 @@ void ClipPlayer::beginBlock (const Transport& t, bool reverse) noexcept
                 const double beatsIn = std::fmod (juce::jmax (0.0, transport.ppq), clip->beats);
                 start = beatsIn * 60.0 / transport.bpm * sampleRate;
             }
+            if (command.from >= 0.0f && clip->audio != nullptr)
+                start = command.from * (double) clip->audio->getNumSamples();
             startVoice (allocateVoice(), *clip, true, -1, 1.0, 1.0f, start);
         }
     }

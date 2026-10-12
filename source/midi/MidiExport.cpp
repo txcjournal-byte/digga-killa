@@ -106,4 +106,17 @@ TranscriptionCache::NotesPtr TranscriptionCache::get (const AudioPtr& audio, dou
     return result.get();
 }
 
+TranscriptionCache::NotesPtr TranscriptionCache::tryGet (const AudioPtr& audio, double sampleRate)
+{
+    if (audio == nullptr)
+        return {};
+
+    std::shared_future<NotesPtr> result;
+    {
+        const std::lock_guard<std::mutex> sl (lock);
+        result = start (audio, sampleRate);
+    }
+    return result.wait_for (std::chrono::seconds (0)) == std::future_status::ready ? result.get() : NotesPtr {};
+}
+
 } // namespace digga::midi

@@ -46,8 +46,10 @@ public:
     // ---- message thread
     void setBank (std::unique_ptr<ClipBank> newBank) { bank.publish (std::move (newBank)); }
     void collectGarbage() { bank.collectGarbage(); }
-    void preview (int id)             { commands.push ({ Command::preview, id }); }
-    void stopPreview()                { commands.push ({ Command::stopPreview, -1 }); }
+    void preview (int id)             { commands.push ({ Command::preview, id, -1.0f }); }
+    /** Preview from a point of the clip (0..1 of the clip as heard). */
+    void previewFrom (int id, float fraction) { commands.push ({ Command::preview, id, juce::jlimit (0.0f, 0.999f, fraction) }); }
+    void stopPreview()                { commands.push ({ Command::stopPreview, -1, -1.0f }); }
     void setSelected (int id) noexcept { selected.store (id); }
     int getSelected() const noexcept   { return selected.load(); }
     int getPreviewId() const noexcept  { return previewId.load(); }
@@ -66,6 +68,7 @@ private:
     {
         enum Type { preview, stopPreview } type = preview;
         int id = -1;
+        float from = -1.0f;   // < 0: from the start (or locked to the host bar)
     };
 
     struct Voice

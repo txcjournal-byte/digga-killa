@@ -38,6 +38,9 @@ public:
     /** Result for this clip, computing it now if needed (blocks). */
     NotesPtr get (const AudioPtr& audio, double sampleRate);
 
+    /** Result if it is ready, else null (starts it when needed; never blocks). */
+    NotesPtr tryGet (const AudioPtr& audio, double sampleRate);
+
 private:
     struct Entry
     {

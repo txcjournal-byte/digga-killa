@@ -34,7 +34,7 @@ int TrapWinEditor::initialWidth (int savedWidth)
         area = display->userArea;
 
     const int fitWidth = juce::jmin ((int) (area.getWidth() * 0.72), (int) (area.getHeight() * 0.72 * aspect));
-    const int wanted = savedWidth > 0 ? savedWidth : juce::jmin (1200, fitWidth);
+    const int wanted = savedWidth > 0 ? savedWidth : juce::jmin (1360, fitWidth);
     return juce::jlimit (minWidth, juce::jmax (minWidth, area.getWidth()), wanted);
 }
 

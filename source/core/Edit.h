@@ -3,6 +3,8 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_data_structures/juce_data_structures.h>
 
+#include "fx/FxChain.h"
+
 #include <array>
 
 namespace digga
@@ -19,6 +21,10 @@ struct EditSettings
     /** Loops: level of each stem (vocals, drums, bass, melody), 0..1;
         negative = as generated. */
     std::array<float, 4> stems { -1.0f, -1.0f, -1.0f, -1.0f };
+    /** Loops: where playback starts inside the crop, 0..1 (the audio wraps). */
+    double loopStart = 0.0;
+    /** Effect rack (after crop / pitch / reverse). */
+    fx::FxSettings fx;
 
     bool hasStemMix() const noexcept { return stems[0] >= 0.0f; }
     bool isDefault() const noexcept;
@@ -29,8 +35,11 @@ struct EditSettings
     bool operator!= (const EditSettings& other) const noexcept { return ! (*this == other); }
 };
 
-/** Applies the settings to the original audio (crop -> pitch -> reverse ->
-    fades -> gain). Offline; may take a moment when pitch is used. */
-juce::AudioBuffer<float> renderEdit (const juce::AudioBuffer<float>& original, const EditSettings& edit, double sampleRate);
+/** Applies the settings to the original audio (crop -> loop start -> pitch ->
+    reverse -> effects -> fades -> gain). Offline; may take a moment with
+    pitch or effects. `bpm` syncs the effects; loops keep their length and
+    stay seamless. withFx = false renders the same without the effect rack. */
+juce::AudioBuffer<float> renderEdit (const juce::AudioBuffer<float>& original, const EditSettings& edit, double sampleRate,
+                                     double bpm = 0.0, bool isLoop = false, bool withFx = true);
 
 } // namespace digga

@@ -52,6 +52,43 @@ MainView::MainView (TrapWinProcessor& p) : processor (p)
     list.onMenu = [this] (int id) { showRowMenu (id); };
 
     editor.onEdit = [&engine] (int id, const EditSettings& e) { engine.setEdit (id, e); };
+    editor.onAudition = [this] (int id, double fraction)
+    {
+        // a point of the original -> the same point of the clip as heard
+        auto& e = processor.getEngine();
+        const auto* item = e.find (id);
+        if (item == nullptr)
+            return;
+        const auto& ed = item->edit;
+        if (fraction < ed.start || fraction > ed.end)
+            return;
+        double f = (fraction - ed.start) / juce::jmax (1.0e-9, ed.end - ed.start);
+        f = std::fmod (f - ed.loopStart + 1.0, 1.0);
+        if (ed.reverse)
+            f = 1.0 - f;
+        e.select (id);
+        processor.getClipPlayer().previewFrom (id, (float) f);
+    };
+    editor.onViewChanged = [this] (EditorPanel::View) { updateMidiView(); };
+
+    auto& midiView = editor.getMidiView();
+    midiView.onNotesEdited = [this] { midiEdited = true; };
+    midiView.onDragOut = [this]
+    {
+        auto& e = processor.getEngine();
+        const auto* item = e.find (e.getSelected());
+        const auto& notes = editor.getMidiView().getNotes();
+        if (item == nullptr || notes.empty())
+            return;
+        const auto* a = e.getAnalysis();
+        midi::ExportOptions options;
+        options.bpm = e.getProjectBpm();
+        options.lengthSeconds = item->lengthSeconds (e.getSampleRate());
+        const auto file = midi::writeToTempFile (notes, options,
+                                                 exporter::makeFileName (item->fileTag(), options.bpm, a != nullptr ? a->keyName : juce::String()));
+        if (file.existsAsFile())
+            juce::DragAndDropContainer::performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this);
+    };
     editor.onPlay = [this] (int id) { togglePreview (id); };
     editor.onDragOut = [this] (int id) { dragOut (id); };
 
@@ -83,11 +120,11 @@ void MainView::paint (juce::Graphics& g)
 void MainView::resized()
 {
     header.setBounds (0, 0, logicalWidth, 80);
-    vinyl.setBounds (24, 86, 300, 350);
-    list.setBounds (336, 86, 920, 350);
-    overview.setBounds (24, 446, 1232, 102);
-    editor.setBounds (24, 558, 968, 234);
-    mixer.setBounds (1004, 558, 252, 234);
+    vinyl.setBounds (24, 86, 300, 300);
+    list.setBounds (336, 86, 1080, 300);
+    overview.setBounds (24, 396, 1392, 92);
+    editor.setBounds (24, 498, 1128, 390);
+    mixer.setBounds (1164, 498, 252, 390);
 }
 
 void MainView::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -170,6 +207,7 @@ void MainView::refresh()
                                              : "Stem mix works on loops");
 
     editor.setItem (engine.find (engine.getSelected()), rate, engine.getProjectBpm());
+    updateMidiView();
 }
 
 void MainView::refreshOverview()
@@ -227,6 +265,39 @@ void MainView::refreshOverview()
         overview.setSelection (-1.0, -1.0, -1);
 }
 
+void MainView::updateMidiView()
+{
+    auto& midiView = editor.getMidiView();
+    if (editor.getView() != EditorPanel::View::midi)
+        return;
+
+    const auto& engine = processor.getEngine();
+    const auto* item = engine.find (engine.getSelected());
+    if (item == nullptr || item->dry == nullptr)
+    {
+        shreddedAudio = nullptr;
+        midiView.setEmpty ("Pick a loop or one-shot to shred it into MIDI");
+        return;
+    }
+
+    // the sample as edited, without effects, is what gets shredded
+    if (item->dry == shreddedAudio)
+        return;
+
+    if (const auto notes = transcriptions.tryGet (item->dry, engine.getSampleRate()))
+    {
+        shreddedAudio = item->dry;
+        midiEdited = false;
+        midiView.setBusy (false);
+        if (notes->empty())
+            midiView.setEmpty ("Nothing pitched in this sample - try a melody or 808 loop");
+        else
+            midiView.setNotes (*notes, item->lengthSeconds (engine.getSampleRate()), engine.getProjectBpm());
+    }
+    else
+        midiView.setBusy (true);
+}
+
 void MainView::exportAll()
 {
     auto& engine = processor.getEngine();
@@ -273,6 +344,14 @@ void MainView::timerCallback()
     header.setProjectBpm (processor.getEngine().getProjectBpm());
 
     overview.setPlayhead (player.isPlaying(), player.getProgress());
+    if (editor.getView() == EditorPanel::View::midi && shreddedAudio == nullptr)
+        updateMidiView();
+    else if (editor.getView() == EditorPanel::View::midi)
+    {
+        const auto& e = processor.getEngine();
+        if (const auto* item = e.find (e.getSelected()); item != nullptr && item->dry != shreddedAudio)
+            updateMidiView();
+    }
 
     const auto& clips = processor.getClipPlayer();
     const int previewing = clips.getPreviewId();
@@ -317,7 +396,7 @@ void MainView::prefetchMidi()
         return;
     const auto& engine = processor.getEngine();
     if (const auto* item = engine.find (engine.getSelected()))
-        transcriptions.prefetch (item->edited, engine.getSampleRate());
+        transcriptions.prefetch (item->dry, engine.getSampleRate());
 }
 
 void MainView::dragOut (int id)
@@ -333,17 +412,23 @@ void MainView::dragOut (int id)
     juce::File file;
 
     juce::MouseCursor::showWaitCursor();
+    const bool withFx = editor.isDragWithFx() && item->edit.fx.anyOn();
+    const auto audio = withFx || item->dry == nullptr ? item->edited : item->dry;
+
     if (processor.isDragAsMidi())
     {
         midi::ExportOptions options;
         options.bpm = bpm;
         options.lengthSeconds = item->lengthSeconds (engine.getSampleRate());
-        if (const auto notes = transcriptions.get (item->edited, engine.getSampleRate()))
+        // the notes as edited in the shredder, else a fresh transcription
+        if (item->dry == shreddedAudio && ! editor.getMidiView().getNotes().empty())
+            file = midi::writeToTempFile (editor.getMidiView().getNotes(), options, fileName);
+        else if (const auto notes = transcriptions.get (item->dry, engine.getSampleRate()))
             file = midi::writeToTempFile (*notes, options, fileName);
     }
     else
     {
-        file = exporter::writeWav (*item->edited, engine.getSampleRate(), fileName);
+        file = exporter::writeWav (*audio, engine.getSampleRate(), withFx ? fileName + "_FX" : fileName);
     }
     juce::MouseCursor::hideWaitCursor();
 

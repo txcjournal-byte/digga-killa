@@ -210,7 +210,7 @@ int main (int argc, char** argv)
 
     std::thread script ([&]
     {
-        onMessageThread ([&] { editor->setSize (1280, 800); });
+        onMessageThread ([&] { editor->setSize (1440, 900); });
         wait (300);
         onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_empty.png")); });
 

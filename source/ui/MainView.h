@@ -21,8 +21,8 @@ class MainView : public juce::Component,
                  private juce::Timer
 {
 public:
-    static constexpr int logicalWidth = 1280;
-    static constexpr int logicalHeight = 800;
+    static constexpr int logicalWidth = 1440;
+    static constexpr int logicalHeight = 900;
 
     explicit MainView (TrapWinProcessor& processor);
     ~MainView() override;
@@ -41,6 +41,7 @@ private:
     void prefetchMidi();
     void exportAll();
     void refreshOverview();
+    void updateMidiView();
 
     TrapWinProcessor& processor;
     juce::SharedResourcePointer<theme::Typefaces> typefaces;
@@ -54,6 +55,8 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     const void* shownStems = nullptr;
     size_t shownSections = 0;
+    AudioPtr shreddedAudio;          // clip whose notes the MIDI view shows
+    bool midiEdited = false;         // the user changed the shredded notes
     juce::TooltipWindow tooltips { this, 700 };
     midi::TranscriptionCache transcriptions;
     int shownSelection = -1;

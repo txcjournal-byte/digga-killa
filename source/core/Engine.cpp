@@ -376,6 +376,7 @@ void Engine::startGeneration()
             item.baseMix = mix;
             item.original = std::make_shared<const juce::AudioBuffer<float>> (std::move (audio));
             item.edited = item.original;
+            item.dry = item.original;
             item.originalPeaks = audio::computePeaks (*item.original, loopPeaks);
             item.peaks = item.originalPeaks;
             made.push_back (std::move (item));
@@ -454,6 +455,7 @@ void Engine::startGeneration()
                 item.sourceSeconds = shot.sourceSeconds;
                 item.original = std::make_shared<const juce::AudioBuffer<float>> (shot.audio);
                 item.edited = item.original;
+                item.dry = item.original;
                 item.originalPeaks = audio::computePeaks (*item.original, shotPeaks);
                 item.peaks = item.originalPeaks;
                 made.push_back (std::move (item));
@@ -539,7 +541,7 @@ void Engine::renderEditFor (int id)
         for (auto& i : items)
             if (i.id == id)
             {
-                i.edited = i.original;
+                i.edited = i.dry = i.original;
                 i.peaks = i.originalPeaks;
             }
         publishBank();
@@ -549,17 +551,20 @@ void Engine::renderEditFor (int id)
     // edits are quick; their own queue keeps them from waiting behind an analysis
     editJobs.add ([weak, id, token, gen = generation, original = item->original, edit = item->edit,
                   rate = sampleRate, peaks = (int) item->originalPeaks.size(), plan = item->plan,
-                  baseMix = item->baseMix, songStems = songStems, sourceBpm = analysisResult.bpm, bpm = generatedBpm]
+                  baseMix = item->baseMix, songStems = songStems, sourceBpm = analysisResult.bpm, bpm = generatedBpm,
+                  isLoop = item->kind == ClipKind::loop]
     {
         // a changed stem mix re-renders the loop from the stems first
         auto base = original;
         if (edit.hasStemMix() && plan != nullptr && songStems != nullptr && edit.stems != baseMix)
             base = std::make_shared<const juce::AudioBuffer<float>> (renderStemLoop (*plan, *songStems, edit.stems, rate, sourceBpm, bpm));
 
-        auto rendered = std::make_shared<const juce::AudioBuffer<float>> (renderEdit (*base, edit, rate));
+        auto rendered = std::make_shared<const juce::AudioBuffer<float>> (renderEdit (*base, edit, rate, bpm, plan != nullptr || isLoop));
+        auto dry = edit.fx.anyOn() ? std::make_shared<const juce::AudioBuffer<float>> (renderEdit (*base, edit, rate, bpm, plan != nullptr || isLoop, false))
+                                   : rendered;
         auto renderedPeaks = audio::computePeaks (*rendered, peaks);
 
-        onMessageThread (weak, [id, token, gen, rendered, renderedPeaks] (Engine& e)
+        onMessageThread (weak, [id, token, gen, rendered, dry, renderedPeaks] (Engine& e)
         {
             if (gen != e.generation || e.editTokens[id] != token)
                 return;
@@ -567,6 +572,7 @@ void Engine::renderEditFor (int id)
                 if (i.id == id)
                 {
                     i.edited = rendered;
+                    i.dry = dry;
                     i.peaks = renderedPeaks;
                 }
             e.publishBank();

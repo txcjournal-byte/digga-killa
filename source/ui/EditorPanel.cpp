@@ -15,8 +15,8 @@ DragPill::DragPill()
 void DragPill::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat().reduced (2.0f);
-    juce::Graphics::ScopedSaveState s (g);
-    g.setOpacity (isEnabled() ? 1.0f : 0.35f);
+    // a transparency layer: the chrome gradient ignores setOpacity
+    g.beginTransparencyLayer (isEnabled() ? 1.0f : 0.35f);
     drawChromePill (g, r, hover, false);
     g.setColour (well);
     for (int col = 0; col < 2; ++col)
@@ -24,6 +24,7 @@ void DragPill::paint (juce::Graphics& g)
             g.fillEllipse (r.getX() + 20.0f + (float) col * 6.0f, r.getCentreY() + (float) (row - 1) * 6.0f - 1.6f, 3.2f, 3.2f);
     g.setFont (display (14.0f).withExtraKerningFactor (0.04f));
     g.drawText ("DRAG TO DAW", r.withTrimmedLeft (30.0f), juce::Justification::centred, false);
+    g.endTransparencyLayer();
 }
 
 void DragPill::mouseDrag (const juce::MouseEvent& e)
@@ -37,16 +38,82 @@ void DragPill::mouseDrag (const juce::MouseEvent& e)
 }
 
 // ---------------------------------------------------------------------------- editor
+namespace
+{
+    const char* snapName (WaveformEditor::Snap s)
+    {
+        switch (s)
+        {
+            case WaveformEditor::Snap::off:          return "Snap off";
+            case WaveformEditor::Snap::zeroCrossing: return "Snap zero";
+            case WaveformEditor::Snap::sixteenth:    return "Snap 1/16";
+            case WaveformEditor::Snap::eighth:       return "Snap 1/8";
+            case WaveformEditor::Snap::beat:         return "Snap beat";
+            case WaveformEditor::Snap::bar:          return "Snap bar";
+        }
+        return "";
+    }
+}
+
 EditorPanel::EditorPanel()
 {
     play.onClick = [this] { if (onPlay && id >= 0) onPlay (id); };
     reverse.setClickingTogglesState (true);
     reverse.onClick = [this] { edit.reverse = reverse.getToggleState(); commit(); };
+    reset.setTooltip ("Back to the sample as it was cut (crop, fades, pitch, effects, stem mix)");
     reset.onClick = [this] { edit = {}; syncControls(); commit(); };
     drag.onDragOut = [this] { if (onDragOut && id >= 0) onDragOut (id); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag })
+    // view tabs
+    waveTab.onClick = [this] { setView (View::wave); };
+    midiTab.onClick = [this] { setView (View::midi); };
+    fxTab.onClick = [this] { setView (View::fx); };
+    midiTab.setTooltip ("Shred the sample into MIDI notes, edit them, drag them into your piano roll");
+    fxTab.setTooltip ("Effect rack: filter, drive, crush, gate, tape stop, delay, reverb, width, KILL");
+
+    // wave tools
+    zoomOut.onClick = [this] { wave.zoomOut(); };
+    zoomIn.onClick = [this] { wave.zoomIn(); };
+    zoomFit.onClick = [this] { wave.zoomToFit(); };
+    zoomSel.onClick = [this] { wave.zoomToSelection(); };
+    zoomFit.setTooltip ("Show the whole sample");
+    zoomSel.setTooltip ("Zoom to the kept part");
+    snapButton.setTooltip ("Where markers snap (hold Alt while dragging to ignore it)");
+    snapButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        using S = WaveformEditor::Snap;
+        for (auto s : { S::off, S::zeroCrossing, S::sixteenth, S::eighth, S::beat, S::bar })
+            menu.addItem (snapName (s), true, wave.getSnap() == s, [this, s] { wave.setSnap (s); updateSnapButton(); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (snapButton));
+    };
+
+    // drag raw or with the effects
+    dragRaw.setTooltip ("Drag the sample without the effect rack");
+    dragFx.setTooltip ("Drag the sample with the effect rack");
+    dragRaw.onClick = [this] { dragWithFx = false; syncControls(); };
+    dragFx.onClick = [this] { dragWithFx = true; syncControls(); };
+
+    for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag, &waveTab, &midiTab, &fxTab,
+                                                             &zoomOut, &zoomIn, &zoomFit, &zoomSel, &snapButton, &dragRaw, &dragFx,
+                                                             &wave, &midiView, &fxRack })
         addAndMakeVisible (c);
+
+    wave.onRangeChanged = [this] (double start, double end)
+    {
+        edit.start = start;
+        edit.end = end;
+        commit();
+    };
+    wave.onLoopStartChanged = [this] (double f) { edit.loopStart = f; commit(); };
+    wave.onAudition = [this] (double f) { if (onAudition && id >= 0) onAudition (id, f); };
+
+    fxRack.onChange = [this] (const fx::FxSettings& settings)
+    {
+        edit.fx = settings;
+        syncControls();
+        commit();
+    };
 
     auto ms = [] (double v) { return v < 1.0 ? juce::String ("off") : juce::String (juce::roundToInt (v)) + " ms"; };
     sliders[0].label = "Fade in";  sliders[0].format = ms;
@@ -59,60 +126,100 @@ EditorPanel::EditorPanel()
 
     for (size_t i = 0; i < sliders.size(); ++i)
     {
-        auto& s = sliders[i].slider;
-        s.setSliderStyle (juce::Slider::LinearHorizontal);
-        s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-        s.setRange (ranges[i], steps[i]);
+        auto& sl = sliders[i].slider;
+        sl.setSliderStyle (juce::Slider::LinearHorizontal);
+        sl.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        sl.setRange (ranges[i], steps[i]);
         if (i < 2)
-            s.setSkewFactorFromMidPoint (300.0);
-        s.setDoubleClickReturnValue (true, 0.0);
-        s.onValueChange = [this, i]
+            sl.setSkewFactorFromMidPoint (300.0);
+        sl.setDoubleClickReturnValue (true, 0.0);
+        sl.onValueChange = [this, i]
         {
-            auto& sl = sliders[i].slider;
+            auto& s = sliders[i].slider;
             switch (i)
             {
-                case 0: edit.fadeInMs = (float) sl.getValue(); break;
-                case 1: edit.fadeOutMs = (float) sl.getValue(); break;
-                case 2: edit.gainDb = (float) sl.getValue(); break;
-                default: edit.pitch = (float) sl.getValue(); break;
+                case 0: edit.fadeInMs = (float) s.getValue(); break;
+                case 1: edit.fadeOutMs = (float) s.getValue(); break;
+                case 2: edit.gainDb = (float) s.getValue(); break;
+                default: edit.pitch = (float) s.getValue(); break;
             }
             repaint();
-            if (! sl.isMouseButtonDown())
+            if (! s.isMouseButtonDown())
                 commit();
         };
-        s.onDragEnd = [this] { commit(); };
-        addAndMakeVisible (s);
+        sl.onDragEnd = [this] { commit(); };
+        addAndMakeVisible (sl);
     }
 
+    updateSnapButton();
     setItem (nullptr, 44100.0, 120.0);
+    setView (View::wave);
 }
 
-void EditorPanel::setItem (const SampleItem* item, double rate, double)
+EditorPanel::~EditorPanel() = default;
+
+void EditorPanel::updateSnapButton()
+{
+    snapButton.setButtonText (snapName (wave.getSnap()));
+}
+
+void EditorPanel::setView (View v)
+{
+    view = v;
+    waveTab.getProperties().set ("chrome", view == View::wave);
+    midiTab.getProperties().set ("chrome", view == View::midi);
+    fxTab.getProperties().set ("chrome", view == View::fx);
+    for (auto* b : { &waveTab, &midiTab, &fxTab })
+        b->repaint();
+    layoutView();
+    repaint();
+    if (onViewChanged)
+        onViewChanged (view);
+}
+
+void EditorPanel::setItem (const SampleItem* item, double rate, double newBpm)
 {
     const int newId = item != nullptr ? item->id : -1;
     const bool sameItem = newId == id;
 
     id = newId;
     sampleRate = rate;
+    bpm = newBpm;
     if (item != nullptr)
     {
         isLoop = item->kind == ClipKind::loop;
-        bars = item->bars;
         title = item->name;
         detail = item->detail (rate);
-        peaks = item->originalPeaks;
         originalSeconds = item->original != nullptr ? item->original->getNumSamples() / rate : 0.0;
-        if (! sameItem || dragging == 0)
-            edit = item->edit;
+        edit = item->edit;
+
+        if (item->original != shownAudio)
+        {
+            shownAudio = item->original;
+            wave.setAudio (item->original, rate);
+            wave.setGrid (isLoop ? newBpm : 0.0, isLoop);
+            wave.setSnap (isLoop ? WaveformEditor::Snap::beat : WaveformEditor::Snap::zeroCrossing);
+            updateSnapButton();
+            if (! sameItem)
+                wave.zoomToFit();
+        }
+        wave.setRange (edit.start, edit.end);
+        wave.setLoopStart (edit.loopStart);
+        fxRack.setSettings (edit.fx);
+        fxRack.setEnabled (true);
     }
     else
     {
         title = {};
-        peaks.clear();
         edit = {};
+        shownAudio = nullptr;
+        wave.setAudio (nullptr, rate);
+        fxRack.setSettings ({});
+        fxRack.setEnabled (false, "Pick a loop or one-shot");
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag })
+    for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag, &zoomOut, &zoomIn, &zoomFit,
+                                                             &zoomSel, &snapButton, &dragRaw, &dragFx })
         c->setEnabled (item != nullptr);
     for (auto& s : sliders)
         s.slider.setEnabled (item != nullptr);
@@ -127,6 +234,14 @@ void EditorPanel::syncControls()
     sliders[2].slider.setValue (edit.gainDb, juce::dontSendNotification);
     sliders[3].slider.setValue (edit.pitch, juce::dontSendNotification);
     reverse.setToggleState (edit.reverse, juce::dontSendNotification);
+    fxTab.setButtonText (edit.fx.anyOn() ? juce::String (juce::CharPointer_UTF8 ("FX \xe2\x97\x8f")) : juce::String ("FX"));
+
+    const bool fxOn = edit.fx.anyOn();
+    dragRaw.getProperties().set ("chrome", ! dragWithFx || ! fxOn);
+    dragFx.getProperties().set ("chrome", dragWithFx && fxOn);
+    dragFx.setEnabled (id >= 0 && fxOn);
+    dragRaw.repaint();
+    dragFx.repaint();
 }
 
 void EditorPanel::commit()
@@ -143,52 +258,96 @@ void EditorPanel::setPlayback (bool isPlaying, float p)
         progress = p;
         play.setButtonText (playing ? "Stop" : "Play");
         play.getProperties().set ("chrome", playing);
-        repaint();
+        play.repaint();
+
+        // playhead on the original: inside the kept part, after the loop start
+        double pos = edit.reverse ? 1.0 - (double) p : (double) p;
+        pos = std::fmod (pos + edit.loopStart, 1.0);
+        wave.setPlayhead (playing, edit.start + pos * (edit.end - edit.start));
+        midiView.setPlayhead (playing, p);
     }
 }
 
 void EditorPanel::resized()
 {
-    auto r = getLocalBounds().reduced (26, 20);
+    auto r = getLocalBounds().reduced (22, 16);
 
-    auto top = r.removeFromTop (44);
+    headerArea = r.removeFromTop (44);
+    auto top = headerArea;
     drag.setBounds (top.removeFromRight (190).withSizeKeepingCentre (190, 40));
-    top.removeFromRight (12);
-    reset.setBounds (top.removeFromRight (86).withSizeKeepingCentre (86, 34));
     top.removeFromRight (8);
-    reverse.setBounds (top.removeFromRight (106).withSizeKeepingCentre (106, 34));
+    dragFx.setBounds (top.removeFromRight (46).withSizeKeepingCentre (46, 30));
+    top.removeFromRight (4);
+    dragRaw.setBounds (top.removeFromRight (56).withSizeKeepingCentre (56, 30));
+    top.removeFromRight (16);
+    reset.setBounds (top.removeFromRight (80).withSizeKeepingCentre (80, 34));
     top.removeFromRight (8);
-    play.setBounds (top.removeFromRight (86).withSizeKeepingCentre (86, 34));
+    reverse.setBounds (top.removeFromRight (100).withSizeKeepingCentre (100, 34));
+    top.removeFromRight (8);
+    play.setBounds (top.removeFromRight (80).withSizeKeepingCentre (80, 34));
 
-    r.removeFromTop (12);
-    auto controls = r.removeFromBottom (46);
-    r.removeFromBottom (12);
-    waveArea = r;
+    r.removeFromTop (10);
+    auto tabs = r.removeFromTop (30);
+    waveTab.setBounds (tabs.removeFromLeft (92));
+    tabs.removeFromLeft (8);
+    midiTab.setBounds (tabs.removeFromLeft (128));
+    tabs.removeFromLeft (8);
+    fxTab.setBounds (tabs.removeFromLeft (80));
 
-    const int w = controls.getWidth() / (int) sliders.size();
-    for (size_t i = 0; i < sliders.size(); ++i)
-    {
-        auto cell = controls.removeFromLeft (w).reduced (10, 0);
-        sliders[i].slider.setBounds (cell.removeFromBottom (24));
-    }
+    snapButton.setBounds (tabs.removeFromRight (118));
+    tabs.removeFromRight (14);
+    zoomSel.setBounds (tabs.removeFromRight (54));
+    tabs.removeFromRight (6);
+    zoomFit.setBounds (tabs.removeFromRight (54));
+    tabs.removeFromRight (6);
+    zoomIn.setBounds (tabs.removeFromRight (36));
+    tabs.removeFromRight (6);
+    zoomOut.setBounds (tabs.removeFromRight (36));
+
+    r.removeFromTop (10);
+    mainArea = r;
+    layoutView();
 }
 
-float EditorPanel::toX (double f) const   { return (float) waveArea.getX() + (float) f * (float) waveArea.getWidth(); }
-double EditorPanel::toFraction (float x) const { return juce::jlimit (0.0, 1.0, (double) (x - (float) waveArea.getX()) / juce::jmax (1, waveArea.getWidth())); }
-
-double EditorPanel::snap (double f) const
+void EditorPanel::layoutView()
 {
-    if (! isLoop || bars <= 0)
-        return f;
-    const double beats = bars * 4.0;
-    return std::round (f * beats) / beats;
+    auto r = mainArea;
+    const bool showWave = view == View::wave;
+    for (auto* c : std::initializer_list<juce::Component*> { &zoomOut, &zoomIn, &zoomFit, &zoomSel, &snapButton })
+        c->setVisible (showWave);
+    for (auto& s : sliders)
+        s.slider.setVisible (showWave);
+    wave.setVisible (showWave);
+    midiView.setVisible (view == View::midi);
+    fxRack.setVisible (view == View::fx);
+
+    if (showWave)
+    {
+        controlsArea = r.removeFromBottom (44);
+        r.removeFromBottom (10);
+        wave.setBounds (r);
+
+        auto controls = controlsArea;
+        const int w = controls.getWidth() / (int) sliders.size();
+        for (size_t i = 0; i < sliders.size(); ++i)
+        {
+            auto cell = controls.removeFromLeft (w).reduced (10, 0);
+            sliders[i].slider.setBounds (cell.removeFromBottom (24));
+        }
+    }
+    else
+    {
+        controlsArea = {};
+        midiView.setBounds (r);
+        fxRack.setBounds (r);
+    }
 }
 
 void EditorPanel::paint (juce::Graphics& g)
 {
     drawCard (g, getLocalBounds().toFloat().reduced (1.0f));
 
-    auto header = getLocalBounds().reduced (26, 20).removeFromTop (44).toFloat();
+    auto header = headerArea.toFloat();
     if (id < 0)
     {
         drawMonoLabel (g, "Editor", header.removeFromTop (16.0f), juce::Justification::topLeft, accent, 11.0f);
@@ -198,127 +357,30 @@ void EditorPanel::paint (juce::Graphics& g)
     }
     else
     {
-        auto label = header.removeFromLeft (header.getWidth() - 520.0f);
-        fillChrome (g, textPath (title.toUpperCase(), display (30.0f), label.removeFromTop (28.0f).withWidth (juce::jmin (label.getWidth(), 18.0f * (float) title.length() + 40.0f))), true);
+        auto label = header.removeFromLeft (juce::jmax (120.0f, header.getWidth() - 640.0f));
+        fillChrome (g, textPath (title.toUpperCase(), display (28.0f),
+                                 label.removeFromTop (27.0f).withWidth (juce::jmin (label.getWidth(), 17.0f * (float) title.length() + 40.0f))), true);
         const juce::String dot (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
         const double seconds = (edit.end - edit.start) * originalSeconds;
-        drawMonoLabel (g, detail + dot + "edit " + juce::String (seconds, 2) + " s", label, juce::Justification::topLeft, muted, 10.5f);
+        juce::String info = detail + dot + "edit " + juce::String (seconds, 2) + " s";
+        if (edit.fx.anyOn())
+            info << dot << "fx on";
+        drawMonoLabel (g, info, label, juce::Justification::topLeft, muted, 10.0f);
+
+        drawMonoLabel (g, "Drag", dragRaw.getBounds().toFloat().translated (-44.0f, 0.0f).withWidth (40.0f),
+                       juce::Justification::centredRight, muted, 9.5f);
     }
 
-    // waveform well
-    const auto wa = waveArea.toFloat();
-    g.setColour (well);
-    g.fillRoundedRectangle (wa, 14.0f);
-    g.setColour (line);
-    g.drawRoundedRectangle (wa.reduced (0.5f), 14.0f, 1.0f);
-
-    if (id < 0)
-        return;
-
-    // beat / bar grid
-    if (isLoop && bars > 0)
-        for (int b = 1; b < bars * 4; ++b)
+    // slider captions (wave view)
+    if (view == View::wave)
+        for (auto& s : sliders)
         {
-            const float x = toX ((double) b / (bars * 4.0));
-            g.setColour (accentL.withAlpha (b % 4 == 0 ? 0.16f : 0.06f));
-            g.drawVerticalLine ((int) x, wa.getY() + 6.0f, wa.getBottom() - 6.0f);
+            const auto b = s.slider.getBounds().toFloat().translated (0.0f, -18.0f).withHeight (16.0f);
+            drawMonoLabel (g, s.label, b, juce::Justification::centredLeft, muted, 10.0f);
+            g.setColour (text);
+            g.setFont (mono (11.0f, true));
+            g.drawText (s.format (s.slider.getValue()), b, juce::Justification::centredRight, false);
         }
-
-    const auto inner = wa.reduced (0.0f, 12.0f);
-    drawWaveform (g, peaks, inner, muted.withAlpha (0.45f), muted.withAlpha (0.25f));
-
-    // the kept part, bright
-    const float x0 = toX (edit.start), x1 = toX (edit.end);
-    {
-        juce::Graphics::ScopedSaveState s (g);
-        g.reduceClipRegion (juce::Rectangle<float> (x0, wa.getY(), x1 - x0, wa.getHeight()).toNearestInt());
-        drawWaveform (g, peaks, inner, accentL, juce::Colour (0xff4f78c4));
-
-        // fades as ramps
-        const float fadeIn = (float) (edit.fadeInMs * 0.001 / juce::jmax (0.001, originalSeconds)) * wa.getWidth();
-        const float fadeOut = (float) (edit.fadeOutMs * 0.001 / juce::jmax (0.001, originalSeconds)) * wa.getWidth();
-        g.setColour (text.withAlpha (0.7f));
-        if (fadeIn > 1.0f)
-            g.drawLine (x0, wa.getBottom() - 6.0f, juce::jmin (x1, x0 + fadeIn), wa.getY() + 6.0f, 1.5f);
-        if (fadeOut > 1.0f)
-            g.drawLine (juce::jmax (x0, x1 - fadeOut), wa.getY() + 6.0f, x1, wa.getBottom() - 6.0f, 1.5f);
-    }
-
-    // crop handles
-    for (float x : { x0, x1 })
-    {
-        g.setColour (accentL);
-        g.fillRect (x - 1.0f, wa.getY(), 2.0f, wa.getHeight());
-        g.fillRoundedRectangle (x - 5.0f, wa.getY() + wa.getHeight() * 0.5f - 14.0f, 10.0f, 28.0f, 4.0f);
-    }
-
-    // playhead (inside the kept part)
-    if (playing)
-    {
-        const float pos = edit.reverse ? 1.0f - progress : progress;
-        const float x = x0 + pos * (x1 - x0);
-        g.setColour (text);
-        g.fillRect (x - 0.75f, wa.getY() + 4.0f, 1.5f, wa.getHeight() - 8.0f);
-    }
-
-    if (std::abs (edit.pitch) > 0.01f || edit.reverse || std::abs (edit.gainDb) > 0.01f)
-    {
-        juce::StringArray tags;
-        if (edit.reverse) tags.add ("REVERSED");
-        if (std::abs (edit.pitch) > 0.01f) tags.add (sliders[3].format (edit.pitch));
-        if (std::abs (edit.gainDb) > 0.01f) tags.add (sliders[2].format (edit.gainDb));
-        drawMonoLabel (g, tags.joinIntoString ("  "), wa.reduced (14.0f, 8.0f).removeFromTop (14.0f), juce::Justification::topRight, accentL, 10.0f);
-    }
-
-    // slider captions
-    for (auto& s : sliders)
-    {
-        const auto b = s.slider.getBounds().toFloat().translated (0.0f, -20.0f).withHeight (18.0f);
-        drawMonoLabel (g, s.label, b, juce::Justification::centredLeft, muted, 10.5f);
-        g.setColour (text);
-        g.setFont (mono (11.5f, true));
-        g.drawText (s.format (s.slider.getValue()), b, juce::Justification::centredRight, false);
-    }
-}
-
-void EditorPanel::mouseMove (const juce::MouseEvent& e)
-{
-    const bool nearHandle = id >= 0 && waveArea.contains (e.getPosition())
-                         && (std::abs (e.position.x - toX (edit.start)) < 9.0f || std::abs (e.position.x - toX (edit.end)) < 9.0f);
-    setMouseCursor (nearHandle ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
-}
-
-void EditorPanel::mouseDown (const juce::MouseEvent& e)
-{
-    dragging = 0;
-    if (id < 0 || ! waveArea.contains (e.getPosition()))
-        return;
-    const float ds = std::abs (e.position.x - toX (edit.start)), de = std::abs (e.position.x - toX (edit.end));
-    if (juce::jmin (ds, de) < 12.0f)
-        dragging = ds <= de ? 1 : 2;
-}
-
-void EditorPanel::mouseDrag (const juce::MouseEvent& e)
-{
-    if (dragging == 0)
-        return;
-
-    const double minLength = isLoop && bars > 0 ? 1.0 / (bars * 4.0) : 0.02 / juce::jmax (0.02, originalSeconds);
-    const double f = snap (toFraction (e.position.x));
-    if (dragging == 1)
-        edit.start = juce::jlimit (0.0, edit.end - minLength, f);
-    else
-        edit.end = juce::jlimit (edit.start + minLength, 1.0, f);
-    repaint();
-}
-
-void EditorPanel::mouseUp (const juce::MouseEvent&)
-{
-    if (dragging != 0)
-    {
-        dragging = 0;
-        commit();
-    }
 }
 
 } // namespace digga

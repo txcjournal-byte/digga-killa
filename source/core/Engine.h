@@ -34,6 +34,7 @@ struct SampleItem
 
     AudioPtr original;             // as generated
     AudioPtr edited;               // after the editor's settings (== original when untouched)
+    AudioPtr dry;                  // the same edit without the effect rack (== edited without FX)
     std::vector<float> originalPeaks, peaks;
     EditSettings edit;
 
