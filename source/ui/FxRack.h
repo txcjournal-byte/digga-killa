@@ -25,9 +25,17 @@ public:
     void resized() override;
 
 private:
+    struct Parts;   // the controls (FxRack.cpp)
+
+    void commit();  // end of a gesture: report the settings
+    void refresh(); // controls <- settings
+
     fx::FxSettings settings;
     bool enabled = false;
     juce::String message;
+    std::unique_ptr<Parts> parts;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxRack)
 };
 
 } // namespace digga
