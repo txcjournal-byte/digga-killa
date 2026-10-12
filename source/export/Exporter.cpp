@@ -28,10 +28,17 @@ juce::File writeWav (const juce::AudioBuffer<float>& audio, double sampleRate, c
     auto file = folder.getChildFile (fileName + ".wav");
     if (file.exists() && ! file.deleteFile())
         file = file.getNonexistentSibling (false);
+    return writeWavTo (audio, sampleRate, file) ? file : juce::File();
+}
 
+bool writeWavTo (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::File& file)
+{
+    if (audio.getNumSamples() == 0)
+        return false;
+    file.deleteFile();
     std::unique_ptr<juce::OutputStream> stream (file.createOutputStream());
     if (stream == nullptr)
-        return {};
+        return false;
 
     // keep inter-sample peaks out of the red
     juce::AudioBuffer<float> safe (audio);
@@ -46,11 +53,11 @@ juce::File writeWav (const juce::AudioBuffer<float>& audio, double sampleRate, c
                              .withBitsPerSample (24);
     auto writer = wav.createWriterFor (stream, options);
     if (writer == nullptr)
-        return {};
+        return false;
 
     writer->writeFromAudioSampleBuffer (safe, 0, safe.getNumSamples());
     writer.reset();
-    return file;
+    return true;
 }
 
 } // namespace digga::exporter

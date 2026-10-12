@@ -18,7 +18,7 @@ public:
     void setTempoFixEnabled (bool enabled);
 
     std::function<void (double)> onBpmTyped;
-    std::function<void()> onDouble, onHalve;
+    std::function<void()> onDouble, onHalve, onExportAll;
 
     FormatSwitch format;
 
@@ -31,6 +31,7 @@ private:
 
     juce::TextButton doubleButton { juce::String (juce::CharPointer_UTF8 ("\xc3\x97" "2")) };
     juce::TextButton halveButton { juce::String (juce::CharPointer_UTF8 ("\xc3\xb7" "2")) };
+    juce::TextButton exportButton { "Export all" };
     std::unique_ptr<juce::TextEditor> editor;
 
     double sampleBpm = 0.0, projectBpm = 0.0;

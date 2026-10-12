@@ -21,7 +21,9 @@ Header::Header()
     halveButton.setTooltip ("Sample tempo / 2 (detected double time)");
     doubleButton.onClick = [this] { if (onDouble) onDouble(); };
     halveButton.onClick = [this] { if (onHalve) onHalve(); };
-    for (auto* c : std::initializer_list<juce::Component*> { &doubleButton, &halveButton, &format })
+    exportButton.setTooltip ("Save every loop and one-shot into a folder, sorted like the tabs");
+    exportButton.onClick = [this] { if (onExportAll) onExportAll(); };
+    for (auto* c : std::initializer_list<juce::Component*> { &doubleButton, &halveButton, &format, &exportButton })
         addAndMakeVisible (c);
     setTempoFixEnabled (false);
 }
@@ -51,6 +53,7 @@ void Header::setTempoFixEnabled (bool enabled)
 {
     doubleButton.setEnabled (enabled);
     halveButton.setEnabled (enabled);
+    exportButton.setEnabled (enabled);
 }
 
 void Header::resized()
@@ -58,6 +61,8 @@ void Header::resized()
     auto r = getLocalBounds().reduced (28, 0);
     wordmarkArea = r.removeFromLeft (420).toFloat();
 
+    exportButton.setBounds (r.removeFromRight (124).withSizeKeepingCentre (124, 34));
+    r.removeFromRight (12);
     format.setBounds (r.removeFromRight (210).withSizeKeepingCentre (210, 34));
     r.removeFromRight (16);
     halveButton.setBounds (r.removeFromRight (52).withSizeKeepingCentre (52, 34));

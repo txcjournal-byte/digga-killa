@@ -29,6 +29,8 @@ public:
     void setSample (std::unique_ptr<PlaybackSample> sample) { handoff.publish (std::move (sample)); }
     void collectGarbage() { handoff.collectGarbage(); }
     void requestStart() noexcept   { startRequested.store (true); }
+    /** Plays from a point of the song (0..1), e.g. a click on the overview. */
+    void requestStartAt (float fraction) noexcept { startAt.store (juce::jlimit (0.0f, 1.0f, fraction)); startRequested.store (true); }
     void requestStop() noexcept    { stopRequested.store (true); }
 
     bool isPlaying() const noexcept    { return playingFlag.load(); }
@@ -48,6 +50,7 @@ private:
     std::atomic<bool> startRequested { false }, stopRequested { false };
     std::atomic<bool> playingFlag { false };
     std::atomic<float> progress { 0.0f };
+    std::atomic<float> startAt { 0.0f };
 
     double currentRate = 44100.0;
     juce::int64 position = 0;

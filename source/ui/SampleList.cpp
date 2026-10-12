@@ -78,7 +78,9 @@ void SampleRow::paint (juce::Graphics& g)
     }
     drawMonoLabel (g, model.detail, textArea.withTrimmedTop (2.0f), juce::Justification::topLeft, muted, 10.5f);
 
-    drawWaveform (g, model.peaks, wave, selected ? accentL : accent, selected ? juce::Colour (0xff4f78c4) : juce::Colour (0xff3a5a96));
+    const auto colour = model.stem >= 0 ? stemColours[model.stem] : accentL;
+    drawWaveform (g, model.peaks, wave, selected ? colour : colour.withMultipliedBrightness (0.8f),
+                  colour.darker (selected ? 0.5f : 0.8f));
 
     g.setColour (text2);
     g.setFont (mono (12.0f));
@@ -124,21 +126,34 @@ void SampleRow::mouseUp (const juce::MouseEvent& e)
 }
 
 // ---------------------------------------------------------------------------- list
+const char* SampleList::groupId (int index)
+{
+    static const char* ids[] = { "Loops", "Drums", "Bass", "Melody", "Vocals" };
+    return ids[juce::jlimit (0, numGroups - 1, index)];
+}
+
+const char* SampleList::groupTitle (int index)
+{
+    static const char* titles[] = { "Loops", "Drums", "808 & Bass", "Melody", "Vocals" };
+    return titles[juce::jlimit (0, numGroups - 1, index)];
+}
+
 SampleList::SampleList()
 {
-    loopsTab.onClick = [this] { showingShots = false; rebuild(); };
-    shotsTab.onClick = [this] { showingShots = true; rebuild(); };
+    for (int i = 0; i < numGroups; ++i)
+    {
+        tabs[(size_t) i].onClick = [this, i] { shownGroup = i; rebuild(); };
+        addAndMakeVisible (tabs[(size_t) i]);
+    }
     viewport.setViewedComponent (&content, false);
     viewport.setScrollBarsShown (true, false);
-    for (auto* c : std::initializer_list<juce::Component*> { &loopsTab, &shotsTab, &viewport })
-        addAndMakeVisible (c);
+    addAndMakeVisible (viewport);
     rebuild();
 }
 
-void SampleList::setRows (std::vector<RowModel> l, std::vector<RowModel> s)
+void SampleList::setRows (std::array<std::vector<RowModel>, numGroups> g)
 {
-    loops = std::move (l);
-    shots = std::move (s);
+    groups = std::move (g);
     rebuild();
 }
 
@@ -150,10 +165,17 @@ void SampleList::setPlaceholder (const juce::String& t)
 
 void SampleList::showTabFor (int id)
 {
-    for (const auto& m : shots)
-        if (m.id == id && ! showingShots) { showingShots = true; rebuild(); return; }
-    for (const auto& m : loops)
-        if (m.id == id && showingShots) { showingShots = false; rebuild(); return; }
+    for (int i = 0; i < numGroups; ++i)
+        for (const auto& m : groups[(size_t) i])
+            if (m.id == id)
+            {
+                if (i != shownGroup)
+                {
+                    shownGroup = i;
+                    rebuild();
+                }
+                return;
+            }
 }
 
 void SampleList::setSelectedId (int id)
@@ -174,14 +196,17 @@ void SampleList::setPlayingId (int id)
 
 void SampleList::rebuild()
 {
-    loopsTab.setButtonText ("Loops  " + juce::String ((int) loops.size()));
-    shotsTab.setButtonText ("One-shots  " + juce::String ((int) shots.size()));
-    loopsTab.getProperties().set ("chrome", ! showingShots);
-    shotsTab.getProperties().set ("chrome", showingShots);
-    loopsTab.repaint();
-    shotsTab.repaint();
+    for (int i = 0; i < numGroups; ++i)
+    {
+        auto& tab = tabs[(size_t) i];
+        const auto count = (int) groups[(size_t) i].size();
+        tab.setButtonText (juce::String (groupTitle (i)) + (count > 0 ? "  " + juce::String (count) : juce::String()));
+        tab.getProperties().set ("chrome", i == shownGroup);
+        tab.setEnabled (count > 0 || i == shownGroup);
+        tab.repaint();
+    }
 
-    const auto& models = showingShots ? shots : loops;
+    const auto& models = groups[(size_t) shownGroup];
     rows.resize (models.size());
     for (size_t i = 0; i < models.size(); ++i)
     {
@@ -206,12 +231,15 @@ void SampleList::rebuild()
 
 void SampleList::resized()
 {
-    auto r = getLocalBounds().reduced (20, 18);
-    auto tabs = r.removeFromTop (38);
-    loopsTab.setBounds (tabs.removeFromLeft (150));
-    tabs.removeFromLeft (10);
-    shotsTab.setBounds (tabs.removeFromLeft (170));
-    r.removeFromTop (12);
+    auto r = getLocalBounds().reduced (18, 16);
+    auto tabRow = r.removeFromTop (34);
+    const int widths[] = { 112, 112, 140, 120, 116 };
+    for (int i = 0; i < numGroups; ++i)
+    {
+        tabs[(size_t) i].setBounds (tabRow.removeFromLeft (widths[i]));
+        tabRow.removeFromLeft (8);
+    }
+    r.removeFromTop (10);
     viewport.setBounds (r);
     layoutRows();
 }

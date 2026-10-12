@@ -10,6 +10,9 @@ namespace digga::exporter
     on a file a DAW still holds open: picks a new name instead). */
 juce::File writeWav (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::String& fileName);
 
+/** Writes a 24-bit WAV to a given file (replacing it). */
+bool writeWavTo (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::File& file);
+
 /** "TrapWin_Drop_16bars_140bpm_F#m" */
 juce::String makeFileName (const juce::String& tag, double bpm, const juce::String& key);
 

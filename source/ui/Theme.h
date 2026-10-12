@@ -18,6 +18,11 @@ inline const juce::Colour accentL  { 0xff9fc3ff };
 inline const juce::Colour glow     { 0x804676c4 };
 inline const juce::Colour line     { 0x2e9fc3ff };   // rgba(159,195,255,.18)
 
+// ---- stem colours (cool tones within the brand palette): vocals, drums, bass, melody
+inline const juce::Colour stemColours[4] { juce::Colour (0xffb79cff), juce::Colour (0xff9fc3ff),
+                                           juce::Colour (0xff5f7cff), juce::Colour (0xff66d6e6) };
+inline const char* const stemLabels[4] { "VOX", "DRUMS", "808 / BASS", "MELODY" };
+
 /** Keeps the embedded typefaces alive (hold via SharedResourcePointer). */
 struct Typefaces
 {

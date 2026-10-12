@@ -2,6 +2,7 @@
 
 #include "ui/Theme.h"
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -14,6 +15,8 @@ struct RowModel
     juce::String name, detail, length;
     std::vector<float> peaks;
     bool edited = false;
+    bool loop = false;
+    int stem = -1;   // stem colour for the waveform, -1 = mix
 };
 
 /** One sample in the list: play, name + where it came from, waveform,
@@ -45,13 +48,18 @@ private:
     bool selected = false, playing = false, hover = false, dragStarted = false, pressedPlay = false;
 };
 
-/** Right card: LOOPS / ONE-SHOTS tabs over a scrolling list of rows. */
+/** Browser card: one tab per group (LOOPS, DRUMS, 808 & BASS, MELODY,
+    VOCALS) over a scrolling list of rows. */
 class SampleList : public juce::Component
 {
 public:
+    static constexpr int numGroups = 5;
+    static const char* groupId (int index);      // "Loops", "Drums", "Bass", "Melody", "Vocals"
+    static const char* groupTitle (int index);   // "Loops", "Drums", "808 & Bass", ...
+
     SampleList();
 
-    void setRows (std::vector<RowModel> loops, std::vector<RowModel> shots);
+    void setRows (std::array<std::vector<RowModel>, numGroups> groups);
     void setSelectedId (int id);
     void setPlayingId (int id);
     void showTabFor (int id);
@@ -66,9 +74,9 @@ private:
     void rebuild();
     void layoutRows();
 
-    juce::TextButton loopsTab, shotsTab;
-    bool showingShots = false;
-    std::vector<RowModel> loops, shots;
+    std::array<juce::TextButton, numGroups> tabs;
+    int shownGroup = 0;
+    std::array<std::vector<RowModel>, numGroups> groups;
     juce::String placeholder { "Loops and one-shots appear here" };
 
     juce::Viewport viewport;

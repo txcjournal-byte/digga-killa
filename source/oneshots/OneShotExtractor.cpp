@@ -112,6 +112,38 @@ namespace
         return from;
     }
 
+    /** A one-shot holds one hit: cut before a second attack inside it (the
+        5 ms envelope jumps 6 dB above where the decay had fallen to). */
+    int cutAtSecondAttack (const float* mono, int start, int end, double sr)
+    {
+        // 10 ms envelope, 5 ms hop: noise flutter inside a snare / hat tail must not count
+        const int block = juce::jmax (16, (int) (0.01 * sr)), hop = block / 2;
+        const int guard = (int) (0.06 * sr);
+        std::vector<float> env;
+        for (int pos = start; pos + block <= end; pos += hop)
+            env.push_back (rmsOf (mono + pos, block));
+
+        float lowest = 1.0e9f, peak = 0.0f;
+        for (size_t i = 0; i + 1 < env.size(); ++i)
+        {
+            peak = juce::jmax (peak, env[i]);
+            const int pos = start + (int) i * hop;
+            if (pos < start + guard)
+                continue;
+            lowest = juce::jmin (lowest, env[i]);
+            // a real new hit: 8 dB over the decay, sustained for two steps, not a whisper
+            if (env[i] > lowest * 2.5f && env[i + 1] > lowest * 2.5f && env[i] > peak * 0.2f)
+            {
+                size_t quietest = i;
+                for (size_t k = i; k > 0 && k + 8 > i; --k)
+                    if (env[k - 1] < env[quietest])
+                        quietest = k - 1;
+                return juce::jmax (start + guard, start + (int) quietest * hop + hop);
+            }
+        }
+        return end;
+    }
+
     /** End of decay: 10 ms envelope falls 45 dB under its peak (or the next hit). */
     int findEnd (const float* mono, int length, int start, int limit, double sr)
     {
@@ -260,6 +292,16 @@ namespace
             else
                 hit.category = "Perc";
 
+            if (stemMode)
+            {
+                const int cut = cutAtSecondAttack (mono, hit.start, hit.end, sampleRate);
+                if (cut < hit.end)
+                {
+                    hit.end = cut;
+                    lengthSec = (hit.end - hit.start) / sampleRate;
+                }
+            }
+
             // quality: clean attack, nothing on top, full decay, loud enough
             const int pre = juce::jmin (hit.start, (int) (0.03 * sampleRate));
             const float before = rmsOf (mono + hit.start - pre, pre);
@@ -275,6 +317,8 @@ namespace
                              std::log2 ((float) lengthSec + 0.05f) };
             if (hit.category == "Kick" || hit.category == "808")
                 hit.quality += 0.6f * (float) juce::jmin (lengthSec, 0.5);   // full-bodied low hits
+            else if (hit.category == "Snare" || hit.category == "Open Hat")
+                hit.quality += 1.2f * (float) juce::jmin (lengthSec, 0.35);  // full tail, no hat cutting in
             scan.hits.push_back (hit);
         }
         return scan;
@@ -416,6 +460,7 @@ namespace
             hit.start = starts[i];
             const int next = i + 1 < starts.size() ? starts[i + 1] : length;
             hit.end = findEnd (mono, length, hit.start, next, sampleRate);
+            hit.end = cutAtSecondAttack (mono, hit.start, hit.end, sampleRate);
             const double lengthSec = (hit.end - hit.start) / sampleRate;
             if (lengthSec < 0.25)
                 continue;

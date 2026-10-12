@@ -17,7 +17,7 @@ void SamplePlayer::trigger() noexcept
     if (active == nullptr || active->audio->getNumSamples() == 0)
         return;
 
-    position = 0;
+    position = (juce::int64) (startAt.exchange (0.0f) * (float) active->audio->getNumSamples());
     playing = true;
     fadeInRemaining = fadeLength;
     fadeOutRemaining = -1;
