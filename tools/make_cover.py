@@ -1,7 +1,7 @@
 """Shop cover for TrapWin Sampler (1600 x 1600), in the style of the other TrapWin covers:
 official logo, chrome SAMPLER, tagline, the plugin UI with an ice-blue glow, feature line.
 
-usage: python3 -I tools/make_cover.py <ui_2x.png> <out.png>
+usage: python3 -I tools/make_cover.py <ui_2x.png> <out.png> [value line, e.g. "$189 VALUE  ·  GET IT FOR $49"]
 The UI render comes from the test tool (ui_cover.png, 2x).
 """
 import sys, os
@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 ui_p, out_p = sys.argv[1:3]
+value_line = sys.argv[3] if len(sys.argv) > 3 else ""
 W = H = 1600
 
 # ---- background: near-black with the web's blue haze
@@ -82,7 +83,7 @@ spaced(d, W / 2, 506, "DROP A SONG. GET THE KIT.", mono, (159, 195, 255, 255), 6
 
 # ---- the plugin UI, framed, with a soft glow
 ui = Image.open(ui_p).convert("RGBA")
-uw = 1300
+uw = 1180 if value_line else 1300
 ui = ui.resize((uw, int(ui.size[1] * uw / ui.size[0])), Image.LANCZOS)
 ux, uy = (W - uw) // 2, 584
 frame_mask = Image.new("L", (W, H), 0)
@@ -93,10 +94,21 @@ fd.rectangle([ux - 3, uy - 3, ux + uw + 2, uy + ui.size[1] + 2], outline=(88, 10
 fd.rectangle([ux - 1, uy - 1, ux + uw, uy + ui.size[1]], outline=(143, 175, 229, 255), width=1)
 img.alpha_composite(ui, (ux, uy))
 
-# ---- features
-by = uy + ui.size[1] + 46
-spaced(d, W / 2, by, "STEMS  ·  LOOPS  ·  ONE-SHOTS  ·  MIDI", mono, (230, 236, 247, 255), 5)
-spaced(d, W / 2, by + 70, "VST3 / AU  ·  WINDOWS & macOS", mono_small, (127, 166, 232, 255), 5)
+# ---- features (and the value line)
+by = uy + ui.size[1] + 36
+if value_line:
+    price_font = ImageFont.truetype(os.path.join(fonts, "ArchivoDisplay-BlackItalic.ttf"), 54)
+    tw = price_font.getlength(value_line)
+    badge = [W / 2 - tw / 2 - 40, by - 8, W / 2 + tw / 2 + 40, by + 70]
+    glow_mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(glow_mask).rounded_rectangle(badge, radius=39, fill=255)
+    img.alpha_composite(glow_layer(glow_mask, (70, 118, 196), 22, 0.7))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(badge, radius=39, fill=(232, 238, 248, 255))
+    d.text((W / 2 - tw / 2, by + 2), value_line, font=price_font, fill=(5, 7, 11, 255))
+    by += 98
+spaced(d, W / 2, by, "STEMS  \u00b7  LOOPS  \u00b7  ONE-SHOTS  \u00b7  MIDI", mono, (230, 236, 247, 255), 5)
+spaced(d, W / 2, by + 64, "VST3 / AU  \u00b7  WINDOWS & macOS", mono_small, (127, 166, 232, 255), 5)
 
 img.convert("RGB").save(out_p, quality=95)
 print("wrote", out_p)
