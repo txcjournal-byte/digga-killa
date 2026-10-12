@@ -31,9 +31,9 @@ namespace
         return value;
     }
 
-    void save (juce::Component& c, const juce::File& file)
+    void save (juce::Component& c, const juce::File& file, float scale = 1.0f)
     {
-        const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
+        const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, scale);
         file.deleteFile();
         juce::FileOutputStream out (file);
         juce::PNGImageFormat().writeImageToStream (image, out);
@@ -237,7 +237,7 @@ int main (int argc, char** argv)
             if (argc > 3 && juce::String (argv[3]) == "analyse")
             {
                 wait (300);
-                onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); editor = nullptr; juce::MessageManager::getInstance()->stopDispatchLoop(); });
+                onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); save (*editor, outDir.getChildFile ("ui_cover.png"), 2.0f); editor = nullptr; juce::MessageManager::getInstance()->stopDispatchLoop(); });
                 return;
             }
 
@@ -259,7 +259,7 @@ int main (int argc, char** argv)
             check (query<bool> ([&] { return std::abs (engine.find (firstLoop)->edited->getNumSamples() - originalLength / 2) < 4; }),
                    "crop keeps exactly the chosen half");
             wait (300);
-            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); });
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); save (*editor, outDir.getChildFile ("ui_cover.png"), 2.0f); });
 
             std::printf ("\nPLAYBACK\n");
             onMessageThread ([&] { processor.getClipPlayer().preview (firstLoop); });
