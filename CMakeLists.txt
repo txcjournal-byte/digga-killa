@@ -85,6 +85,10 @@ target_sources(TrapWinSampler PRIVATE
     source/ui/SampleList.cpp
     source/ui/SongOverview.cpp
     source/ui/StemMixer.cpp
+    source/ui/WaveformEditor.cpp
+    source/ui/MidiView.cpp
+    source/ui/FxRack.cpp
+    source/fx/FxChain.cpp
     source/ui/EditorPanel.cpp
     source/ui/MainView.cpp)
 
@@ -130,4 +134,13 @@ if(TRAPWIN_BUILD_TOOLS)
     target_compile_definitions(TrapWinTest PRIVATE
         $<TARGET_PROPERTY:TrapWinSampler,COMPILE_DEFINITIONS>)
     target_link_libraries(TrapWinTest PRIVATE TrapWinSampler)
+
+    # single components (waveform editor, MIDI view, FX rack) in isolation
+    juce_add_console_app(TrapWinComponentTest PRODUCT_NAME "TrapWinComponentTest")
+    target_sources(TrapWinComponentTest PRIVATE tools/ComponentTest.cpp tools/test_waveform.cpp tools/test_midi.cpp tools/test_fx.cpp)
+    target_include_directories(TrapWinComponentTest PRIVATE source
+        $<TARGET_PROPERTY:TrapWinSampler,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(TrapWinComponentTest PRIVATE
+        $<TARGET_PROPERTY:TrapWinSampler,COMPILE_DEFINITIONS>)
+    target_link_libraries(TrapWinComponentTest PRIVATE TrapWinSampler)
 endif()
