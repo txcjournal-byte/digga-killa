@@ -16,7 +16,8 @@ bool EditSettings::operator== (const EditSettings& o) const noexcept
     return juce::approximatelyEqual (start, o.start) && juce::approximatelyEqual (end, o.end)
         && juce::approximatelyEqual (fadeInMs, o.fadeInMs) && juce::approximatelyEqual (fadeOutMs, o.fadeOutMs)
         && juce::approximatelyEqual (gainDb, o.gainDb) && juce::approximatelyEqual (pitch, o.pitch)
-        && reverse == o.reverse;
+        && reverse == o.reverse
+        && std::equal (stems.begin(), stems.end(), o.stems.begin(), [] (float a, float b) { return juce::approximatelyEqual (a, b); });
 }
 
 juce::ValueTree EditSettings::toValueTree (const juce::String& key) const
@@ -30,6 +31,9 @@ juce::ValueTree EditSettings::toValueTree (const juce::String& key) const
     t.setProperty ("gain", gainDb, nullptr);
     t.setProperty ("pitch", pitch, nullptr);
     t.setProperty ("reverse", reverse, nullptr);
+    if (hasStemMix())
+        t.setProperty ("stems", juce::String (stems[0]) + " " + juce::String (stems[1]) + " "
+                                + juce::String (stems[2]) + " " + juce::String (stems[3]), nullptr);
     return t;
 }
 
@@ -43,6 +47,10 @@ EditSettings EditSettings::fromValueTree (const juce::ValueTree& t)
     e.gainDb = (float) (double) t.getProperty ("gain", 0.0);
     e.pitch = (float) (double) t.getProperty ("pitch", 0.0);
     e.reverse = (bool) t.getProperty ("reverse", false);
+    const auto mix = juce::StringArray::fromTokens (t["stems"].toString(), " ", "");
+    if (mix.size() == 4)
+        for (int i = 0; i < 4; ++i)
+            e.stems[(size_t) i] = juce::jlimit (0.0f, 1.0f, mix[i].getFloatValue());
     return e;
 }
 

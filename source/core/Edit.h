@@ -3,6 +3,8 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <array>
+
 namespace digga
 {
 
@@ -14,7 +16,11 @@ struct EditSettings
     float gainDb = 0.0f;
     float pitch = 0.0f;              // semitones, length kept
     bool reverse = false;
+    /** Loops: level of each stem (vocals, drums, bass, melody), 0..1;
+        negative = as generated. */
+    std::array<float, 4> stems { -1.0f, -1.0f, -1.0f, -1.0f };
 
+    bool hasStemMix() const noexcept { return stems[0] >= 0.0f; }
     bool isDefault() const noexcept;
     juce::ValueTree toValueTree (const juce::String& key) const;
     static EditSettings fromValueTree (const juce::ValueTree& tree);

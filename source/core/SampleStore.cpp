@@ -25,7 +25,7 @@ namespace
                 audio->copyFrom (ch, 0, source, ch, 0, numIn);
                 continue;
             }
-            juce::Interpolators::WindowedSinc interpolator;
+            juce::Interpolators::Lagrange interpolator;
             interpolator.process (ratio, source.getReadPointer (ch), audio->getWritePointer (ch), numOut, numIn, 0);
         }
 

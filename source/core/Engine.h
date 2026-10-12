@@ -3,10 +3,14 @@
 #include "analysis/Structure.h"
 #include "core/Edit.h"
 #include "core/JobQueue.h"
+#include "loops/LoopGenerator.h"
+#include "oneshots/OneShotExtractor.h"
 #include "playback/ClipPlayer.h"
+#include "separation/Stems.h"
 
 #include <juce_events/juce_events.h>
 
+#include <atomic>
 #include <map>
 
 namespace digga
@@ -22,6 +26,9 @@ struct SampleItem
     juce::String key;              // stable across sessions: "L3", "S5"
     juce::String name;             // "Drop", "Kick In", "808 F#1", "Note C#5"
     juce::String category;         // shots: "Kick", "Snare", ...
+    juce::String group;            // browser tab: "Loops", "Drums", "Bass", "Melody", "Vocals"
+    std::shared_ptr<const loops::LoopPlan> plan;            // loops: where it comes from
+    std::array<float, stems::numStems> baseMix { 1.0f, 1.0f, 1.0f, 1.0f };   // loops: stems in `original`
     int bars = 0;                  // loops
     double sourceSeconds = 0.0;    // where in the song it came from
 
@@ -29,6 +36,9 @@ struct SampleItem
     AudioPtr edited;               // after the editor's settings (== original when untouched)
     std::vector<float> originalPeaks, peaks;
     EditSettings edit;
+
+    bool canMixStems() const noexcept { return plan != nullptr; }
+    std::array<float, stems::numStems> stemMix() const noexcept { return edit.hasStemMix() ? edit.stems : baseMix; }
 
     juce::String detail (double sampleRate) const;   // "16 bars · from 0:42"
     juce::String fileTag() const;                    // "Drop_16bars", "808_F#1"
@@ -66,6 +76,15 @@ public:
     double getProjectBpm() const noexcept;
     double getSampleRate() const noexcept { return sampleRate; }
     juce::String getStatusDetail() const { return statusDetail; }
+    float getProgress() const noexcept { return progress; }
+
+    /** The separated song (null without the stem model or before analysis). */
+    std::shared_ptr<const stems::SongStems> getStems() const noexcept { return songStems; }
+    const std::vector<float>& getOverview() const noexcept { return overview; }
+    const std::vector<analysis::Section>& getSections() const noexcept { return sections; }
+    double getSourceSeconds() const noexcept { return source != nullptr ? source->getNumSamples() / sampleRate : 0.0; }
+    AudioPtr getSource() const noexcept { return source; }
+    bool hasStemModel() const;
 
 private:
     void startAnalysis();
@@ -84,6 +103,11 @@ private:
     analysis::Analysis analysisResult;
     std::shared_ptr<const midi::Posteriors> posteriors;
     std::shared_ptr<const std::vector<midi::Note>> notes;
+    std::shared_ptr<const stems::SongStems> songStems;
+    std::shared_ptr<const std::vector<oneshots::Shot>> shots;
+    std::vector<float> overview;
+    std::vector<analysis::Section> sections;
+    float progress = 0.0f;
     bool hasAnalysis = false;
     double sampleBpmOverride = 0.0;
     double hostBpm = 0.0;
@@ -97,6 +121,7 @@ private:
     Phase phase = Phase::empty;
     juce::String statusDetail;
     juce::uint32 generation = 0;
+    std::shared_ptr<std::atomic<juce::uint32>> latestGeneration = std::make_shared<std::atomic<juce::uint32>> (0u);   // read by workers
 
     mutable juce::CriticalSection stateLock;
     juce::ValueTree savedState { "Engine" };

@@ -183,126 +183,144 @@ namespace
             return result;
         }
 
-        /** Concatenates the bars (crossfading non-adjacent joins), then
-            appends what naturally follows the last bar as crossfade tail. */
-        juce::AudioBuffer<float> gather (const std::vector<int>& seq, int& tailLength) const
-        {
-            const int channels = source.getNumChannels();
-            const int xfade = juce::jmax (16, (int) (0.004 * sampleRate));
-
-            int total = 0;
-            for (int b : seq)
-                total += bars[(size_t) b].end - bars[(size_t) b].start;
-
-            const auto& lastBar = bars[(size_t) seq.back()];
-            tailLength = juce::jmin ((int) (0.05 * sampleRate), (lastBar.end - lastBar.start) / 4);
-
-            juce::AudioBuffer<float> out (channels, total + tailLength);
-            out.clear();
-
-            int pos = 0;
-            for (size_t i = 0; i < seq.size(); ++i)
-            {
-                const auto& bar = bars[(size_t) seq[i]];
-                const int len = bar.end - bar.start;
-                for (int ch = 0; ch < channels; ++ch)
-                    out.copyFrom (ch, pos, source, ch, bar.start, len);
-
-                if (i > 0 && seq[i] != seq[i - 1] + 1)
-                    blendContinuation (out, pos, bars[(size_t) seq[i - 1]].end, xfade);
-
-                pos += len;
-            }
-
-            // tail: the audio that really follows the last bar, else the loop start
-            const int after = lastBar.end;
-            for (int ch = 0; ch < channels; ++ch)
-            {
-                if (after + tailLength <= source.getNumSamples())
-                    out.copyFrom (ch, pos, source, ch, after, tailLength);
-                else
-                    out.copyFrom (ch, pos, source, ch, bars[(size_t) seq.front()].start, tailLength);
-            }
-            return out;
-        }
+        std::pair<int, int> range (int bar) const { return { bars[(size_t) bar].start, bars[(size_t) bar].end }; }
 
     private:
-        /** At a jump, fade the previous bar's continuation out under the new bar. */
-        void blendContinuation (juce::AudioBuffer<float>& out, int joinPos, int continuationStart, int length) const
-        {
-            if (continuationStart + length > source.getNumSamples())
-            {
-                audio::fadeIn (out, joinPos, length);
-                return;
-            }
-
-            for (int ch = 0; ch < out.getNumChannels(); ++ch)
-            {
-                auto* d = out.getWritePointer (ch, joinPos);
-                const auto* c = source.getReadPointer (ch, continuationStart);
-                for (int i = 0; i < length; ++i)
-                {
-                    const float t = ((float) i + 0.5f) / (float) length;
-                    d[i] = d[i] * std::sin (t * juce::MathConstants<float>::halfPi)
-                         + c[i] * std::cos (t * juce::MathConstants<float>::halfPi);
-                }
-            }
-        }
-
         const juce::AudioBuffer<float>& source;
         double sampleRate;
         std::vector<Bar> bars;
     };
 
-    juce::AudioBuffer<float> render (const Planner& planner, const std::vector<int>& seq, int bars,
-                                     double sampleRate, double sourceBpm, double projectBpm)
+    /** At a jump, fade the previous bar's continuation out under the new bar. */
+    void blendContinuation (juce::AudioBuffer<float>& out, int joinPos, const juce::AudioBuffer<float>& region,
+                            int continuationStart, int length)
     {
-        int tail = 0;
-        const auto gathered = planner.gather (seq, tail);
-        const int body = gathered.getNumSamples() - tail;
-
-        const int target = barsToSamples (bars, projectBpm, sampleRate);
-        const double ratio = (double) target / (double) juce::jmax (1, body);
-        const int tailOut = juce::jmax (1, (int) std::lround (tail * ratio));
-
-        auto stretched = juce::approximatelyEqual (sourceBpm, projectBpm) && body == target
-                             ? gathered
-                             : dsp::stretch (gathered, target + tailOut, 0.0, sampleRate);
-
-        // seamless loop: the tail (what follows the end) fades into the start
-        const int xfade = juce::jmin (tailOut, (int) (0.02 * sampleRate));
-        juce::AudioBuffer<float> loop (stretched.getNumChannels(), target);
-        for (int ch = 0; ch < loop.getNumChannels(); ++ch)
-            loop.copyFrom (ch, 0, stretched, ch, 0, target);
-
-        for (int ch = 0; ch < loop.getNumChannels(); ++ch)
+        if (continuationStart < 0 || continuationStart + length > region.getNumSamples())
         {
-            auto* d = loop.getWritePointer (ch);
-            const auto* t = stretched.getReadPointer (ch, target);
-            for (int i = 0; i < xfade; ++i)
-            {
-                const float x = ((float) i + 0.5f) / (float) xfade;
-                d[i] = d[i] * std::sin (x * juce::MathConstants<float>::halfPi)
-                     + t[i] * std::cos (x * juce::MathConstants<float>::halfPi);
-            }
+            audio::fadeIn (out, joinPos, length);
+            return;
         }
 
-        audio::normalise (loop, 0.89f);   // -1 dBFS
-        return loop;
+        for (int ch = 0; ch < out.getNumChannels(); ++ch)
+        {
+            auto* d = out.getWritePointer (ch, joinPos);
+            const auto* c = region.getReadPointer (juce::jmin (ch, region.getNumChannels() - 1), continuationStart);
+            for (int i = 0; i < length; ++i)
+            {
+                const float t = ((float) i + 0.5f) / (float) length;
+                d[i] = d[i] * std::sin (t * juce::MathConstants<float>::halfPi)
+                     + c[i] * std::cos (t * juce::MathConstants<float>::halfPi);
+            }
+        }
+    }
+
+    /** Concatenates the bars (crossfading non-adjacent joins), then appends
+        what naturally follows the last bar as crossfade tail. */
+    juce::AudioBuffer<float> gather (const LoopPlan& plan, const RegionSource& source, int sourceLength,
+                                     double sampleRate, int& tailLength)
+    {
+        const int xfade = juce::jmax (16, (int) (0.004 * sampleRate));
+        const auto& last = plan.barRanges.back();
+        tailLength = juce::jmin ((int) (0.05 * sampleRate), (last.second - last.first) / 4);
+
+        // one read covering every bar, continuation and tail
+        int lo = sourceLength, hi = 0, total = 0;
+        for (const auto& [start, end] : plan.barRanges)
+        {
+            lo = juce::jmin (lo, start);
+            hi = juce::jmax (hi, end + juce::jmax (xfade, tailLength));
+            total += end - start;
+        }
+        hi = juce::jmin (hi, sourceLength);
+        const auto region = source (lo, hi - lo);
+        const int channels = region.getNumChannels();
+
+        juce::AudioBuffer<float> out (channels, total + tailLength);
+        out.clear();
+
+        int pos = 0;
+        for (size_t i = 0; i < plan.barRanges.size(); ++i)
+        {
+            const auto [start, end] = plan.barRanges[i];
+            for (int ch = 0; ch < channels; ++ch)
+                out.copyFrom (ch, pos, region, ch, start - lo, end - start);
+
+            if (i > 0 && plan.barRanges[i - 1].second != start)
+                blendContinuation (out, pos, region, plan.barRanges[i - 1].second - lo, xfade);
+
+            pos += end - start;
+        }
+
+        // tail: the audio that really follows the last bar, else the loop start
+        const int after = last.second;
+        const int tailFrom = after + tailLength <= hi ? after - lo : plan.barRanges.front().first - lo;
+        for (int ch = 0; ch < channels; ++ch)
+            out.copyFrom (ch, pos, region, ch, tailFrom, tailLength);
+        return out;
     }
 }
 
-std::vector<GeneratedLoop> generateSectionLoops (const juce::AudioBuffer<float>& source, double sampleRate,
-                                                 const analysis::Analysis& analysis,
-                                                 const analysis::Structure& structure, double projectBpm)
+juce::AudioBuffer<float> renderLoop (const LoopPlan& plan, const RegionSource& source, int sourceLength,
+                                     double sampleRate, double sourceBpm, double projectBpm)
 {
-    std::vector<GeneratedLoop> loops;
-    if (source.getNumSamples() == 0 || analysis.bpm <= 0.0 || projectBpm <= 0.0)
+    int tail = 0;
+    const auto gathered = gather (plan, source, sourceLength, sampleRate, tail);
+    const int body = gathered.getNumSamples() - tail;
+
+    const int target = barsToSamples (plan.bars, projectBpm, sampleRate);
+    const double ratio = (double) target / (double) juce::jmax (1, body);
+    const int tailOut = juce::jmax (1, (int) std::lround (tail * ratio));
+
+    auto stretched = juce::approximatelyEqual (sourceBpm, projectBpm) && body == target
+                         ? gathered
+                         : dsp::stretch (gathered, target + tailOut, 0.0, sampleRate);
+
+    // seamless loop: the tail (what follows the end) fades into the start
+    const int xfade = juce::jmin (tailOut, (int) (0.02 * sampleRate));
+    juce::AudioBuffer<float> loop (stretched.getNumChannels(), target);
+    for (int ch = 0; ch < loop.getNumChannels(); ++ch)
+        loop.copyFrom (ch, 0, stretched, ch, 0, target);
+
+    for (int ch = 0; ch < loop.getNumChannels(); ++ch)
+    {
+        auto* d = loop.getWritePointer (ch);
+        const auto* t = stretched.getReadPointer (ch, target);
+        for (int i = 0; i < xfade; ++i)
+        {
+            const float x = ((float) i + 0.5f) / (float) xfade;
+            d[i] = d[i] * std::sin (x * juce::MathConstants<float>::halfPi)
+                 + t[i] * std::cos (x * juce::MathConstants<float>::halfPi);
+        }
+    }
+
+    if (audio::peak (loop) > 1.0e-4f)
+        audio::normalise (loop, 0.89f);   // -1 dBFS
+    return loop;
+}
+
+juce::AudioBuffer<float> renderLoop (const LoopPlan& plan, const juce::AudioBuffer<float>& source,
+                                     double sampleRate, double sourceBpm, double projectBpm)
+{
+    return renderLoop (plan, [&source] (int start, int length)
+    {
+        juce::AudioBuffer<float> region (source.getNumChannels(), length);
+        for (int ch = 0; ch < source.getNumChannels(); ++ch)
+            region.copyFrom (ch, 0, source, ch, start, length);
+        return region;
+    }, source.getNumSamples(), sampleRate, sourceBpm, projectBpm);
+}
+
+std::vector<LoopPlan> planSectionLoops (const juce::AudioBuffer<float>& source, double sampleRate,
+                                        const analysis::Analysis& analysis,
+                                        const analysis::Structure& structure)
+{
+    std::vector<LoopPlan> loops;
+    if (source.getNumSamples() == 0 || analysis.bpm <= 0.0)
         return loops;
 
     const Planner planner (source, sampleRate, analysis);
     const int numBars = planner.numBars();
-    constexpr size_t maxLoops = 24;
+    constexpr size_t maxLoops = 16;
 
     struct Plan { juce::String name; int start; int bars; };
     std::vector<Plan> plans;
@@ -350,19 +368,27 @@ std::vector<GeneratedLoop> generateSectionLoops (const juce::AudioBuffer<float>&
         }
     }
 
+    auto makePlan = [&] (const juce::String& name, const std::vector<int>& seq, int length)
+    {
+        LoopPlan plan;
+        plan.name = name;
+        plan.bars = length;
+        plan.sourceBars = seq;
+        plan.startBar = seq.empty() ? 0 : seq.front();
+        plan.sourceSeconds = analysis.downbeatSeconds + plan.startBar * analysis.barSeconds();
+        for (int b : seq)
+            plan.barRanges.push_back (planner.range (b));
+        return plan;
+    };
+
     // short material (a loop, not a song): fall back to the best-sounding phrase
     if (plans.empty())
     {
         for (int length : { 8, 16 })
         {
             const auto best = planner.best (length, {}, 0.0f);
-            GeneratedLoop loop;
-            loop.name = "Loop";
-            loop.bars = length;
-            loop.startBar = best.bars.empty() ? 0 : best.bars.front();
-            loop.sourceSeconds = analysis.downbeatSeconds + loop.startBar * analysis.barSeconds();
-            loop.audio = render (planner, best.bars, length, sampleRate, analysis.bpm, projectBpm);
-            loops.push_back (std::move (loop));
+            if (! best.bars.empty())
+                loops.push_back (makePlan ("Loop", best.bars, length));
         }
         return loops;
     }
@@ -372,14 +398,7 @@ std::vector<GeneratedLoop> generateSectionLoops (const juce::AudioBuffer<float>&
         std::vector<int> seq;
         for (int i = 0; i < p.bars; ++i)
             seq.push_back (p.start + i);
-
-        GeneratedLoop loop;
-        loop.name = p.name;
-        loop.bars = p.bars;
-        loop.startBar = p.start;
-        loop.sourceSeconds = analysis.downbeatSeconds + p.start * analysis.barSeconds();
-        loop.audio = render (planner, seq, p.bars, sampleRate, analysis.bpm, projectBpm);
-        loops.push_back (std::move (loop));
+        loops.push_back (makePlan (p.name, seq, p.bars));
     }
 
     return loops;

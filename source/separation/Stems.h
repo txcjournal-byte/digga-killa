@@ -5,6 +5,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace digga::stems
 {
@@ -22,6 +23,35 @@ enum Stem
 const char* stemName (int stem);
 
 using StemBuffers = std::array<juce::AudioBuffer<float>, numStems>;
+
+/** 16-bit storage for a song's stems (half the memory of float). */
+class CompactAudio
+{
+public:
+    void assign (const juce::AudioBuffer<float>& audio);
+    int getNumChannels() const noexcept { return channels; }
+    int getNumSamples() const noexcept { return length; }
+
+    /** dst[ch][dstStart + i] += gain * this[ch][srcStart + i]; out-of-range reads are silent. */
+    void addTo (juce::AudioBuffer<float>& dst, int dstStart, int srcStart, int numSamples, float gain) const;
+
+private:
+    int channels = 0, length = 0;
+    float scale = 1.0f;
+    std::vector<int16_t> data;   // interleaved
+};
+
+/** The separated song: its four stems and which of them really play. */
+struct SongStems
+{
+    std::array<CompactAudio, numStems> stems;
+    std::array<bool, numStems> present {};      // loud enough to be worth offering
+    std::array<std::vector<float>, numStems> overview;   // 0..1 peaks for the song overview
+    int length = 0, channels = 2;
+
+    /** Mix of the stems with per-stem gains (0..1). */
+    juce::AudioBuffer<float> mix (int start, int numSamples, const std::array<float, numStems>& gains) const;
+};
 
 /** Called with 0..1 progress; return false to cancel. */
 using Progress = std::function<bool (float)>;

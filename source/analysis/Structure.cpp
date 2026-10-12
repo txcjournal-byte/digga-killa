@@ -30,13 +30,15 @@ namespace
         float d = 1.6f * std::abs (a.kick - b.kick) + 1.2f * std::abs (a.melody - b.melody)
                 + 1.0f * std::abs (a.energy - b.energy) + 0.8f * std::abs (a.hats - b.hats)
                 + 0.8f * std::abs (a.bass - b.bass);
+        d += 1.2f * std::abs (a.vocals - b.vocals);
         d += 0.6f * (1.0f - cosineSimilarity (a.chroma.data(), b.chroma.data(), 12));
         return d;
     }
 }
 
 Structure analyseStructure (const juce::AudioBuffer<float>& source, double sampleRate,
-                            const Analysis& a, const midi::Posteriors& notes)
+                            const Analysis& a, const midi::Posteriors& notes,
+                            const stems::SongStems* stemAudio)
 {
     Structure s;
     if (a.bpm <= 0.0 || source.getNumSamples() == 0 || a.onsets == nullptr)
@@ -92,6 +94,17 @@ Structure analyseStructure (const juce::AudioBuffer<float>& source, double sampl
             }
             bar.melody = total > 0 ? (float) active / (float) total : 0.0f;
         }
+        if (stemAudio != nullptr)
+            for (int st = 0; st < stems::numStems; ++st)
+            {
+                std::array<float, stems::numStems> solo {};
+                solo[(size_t) st] = 1.0f;
+                const auto b = stemAudio->mix (start, end - start, solo);
+                float sum = 0.0f;
+                for (int ch = 0; ch < b.getNumChannels(); ++ch)
+                    sum += b.getRMSLevel (ch, 0, b.getNumSamples());
+                bar.stems[(size_t) st] = sum / (float) juce::jmax (1, b.getNumChannels());
+            }
         s.bars.push_back (bar);
     }
 
@@ -105,22 +118,50 @@ Structure analyseStructure (const juce::AudioBuffer<float>& source, double sampl
         maxE = juce::jmax (maxE, b.energy); maxK = juce::jmax (maxK, b.kick);
         maxH = juce::jmax (maxH, b.hats);   maxB = juce::jmax (maxB, b.bass);
     }
+    if (stemAudio != nullptr)
+    {
+        // each stem relative to its loudest bar; a stem that never gets near the
+        // mix level is leakage, not a part of the song
+        float loudestMix = 0.0f;
+        std::array<float, stems::numStems> loudest {};
+        for (const auto& b : s.bars)
+        {
+            loudestMix = juce::jmax (loudestMix, b.energy);
+            for (int st = 0; st < stems::numStems; ++st)
+                loudest[(size_t) st] = juce::jmax (loudest[(size_t) st], b.stems[(size_t) st]);
+        }
+        for (auto& b : s.bars)
+            for (int st = 0; st < stems::numStems; ++st)
+                b.stems[(size_t) st] = loudest[(size_t) st] > 0.12f * loudestMix ? normalised (b.stems[(size_t) st], loudest[(size_t) st]) : 0.0f;
+    }
+
     for (auto& b : s.bars)
     {
         b.energy = normalised (b.energy, maxE);
         b.kick = normalised (b.kick, maxK);
         b.hats = normalised (b.hats, maxH);
         b.bass = normalised (b.bass, maxB);
+        if (stemAudio != nullptr)
+        {
+            b.kick = b.hats = b.stems[stems::drums];
+            b.bass = b.stems[stems::bass];
+            b.melody = b.stems[stems::other];
+            b.vocals = b.stems[stems::vocals];
+        }
     }
 
     const int n = (int) s.bars.size();
     // a kick needs real low end on the beat; pitched attacks alone also make low flux
+    const bool fromStems = stemAudio != nullptr;
     auto hasDrums = [&] (int i)
     {
         const auto& b = s.bars[(size_t) i];
+        if (fromStems)
+            return b.stems[stems::drums] > 0.3f;
         return b.hats > 0.45f || (b.kick > 0.35f && b.bass > 0.12f);
     };
-    auto hasMelody = [&] (int i) { return s.bars[(size_t) i].melody > 0.25f; };
+    auto hasMelody = [&] (int i) { return s.bars[(size_t) i].melody > (fromStems ? 0.3f : 0.25f); };
+    auto hasVocals = [&] (int i) { return s.bars[(size_t) i].vocals > 0.3f; };
 
     // ---- boundaries: novelty between the two bars before and the two bars after
     std::vector<float> novelty ((size_t) n, 0.0f);
@@ -145,6 +186,7 @@ Structure analyseStructure (const juce::AudioBuffer<float>& source, double sampl
     {
         const bool peak = novelty[(size_t) i] >= novelty[(size_t) i - 1] && (i + 1 >= n || novelty[(size_t) i] >= novelty[(size_t) i + 1]);
         const bool event = (hasDrums (i) && ! hasDrums (i - 1)) || (hasMelody (i) && ! hasMelody (i - 1))
+                        || (hasVocals (i) && ! hasVocals (i - 1) && i + 1 < n && hasVocals (i + 1))
                         || (! hasDrums (i) && hasDrums (i - 1) && i + 1 < n && ! hasDrums (i + 1));
         if ((peak && novelty[(size_t) i] > mean * 1.6f) || (event && novelty[(size_t) i] > mean * 1.1f))
             if (i - starts.back() >= 2)   // sections are at least two bars
@@ -158,26 +200,32 @@ Structure analyseStructure (const juce::AudioBuffer<float>& source, double sampl
         sec.startBar = starts[k];
         sec.numBars = (k + 1 < starts.size() ? starts[k + 1] : n) - sec.startBar;
 
-        int drumBars = 0, melodyBars = 0;
+        int drumBars = 0, melodyBars = 0, vocalBars = 0;
         float energy = 0.0f;
         for (int i = sec.startBar; i < sec.startBar + sec.numBars; ++i)
         {
             drumBars += hasDrums (i) ? 1 : 0;
             melodyBars += hasMelody (i) ? 1 : 0;
+            vocalBars += hasVocals (i) ? 1 : 0;
             energy += s.bars[(size_t) i].energy;
         }
         energy /= (float) sec.numBars;
         sec.drums = drumBars * 2 > sec.numBars;
         sec.melodic = melodyBars * 2 > sec.numBars;
+        sec.vocal = vocalBars * 2 > sec.numBars;
 
-        const bool first = k == 0;
+        const bool first = k == 0, last = k + 1 == starts.size();
         const bool prevDrums = ! first && s.sections.back().drums;
         const bool prevMelodic = ! first && s.sections.back().melodic;
 
-        if (first && ! (sec.drums && sec.melodic))
+        if (first && ! (sec.drums && (sec.melodic || sec.vocal)))
             sec.name = "Intro";
-        else if (sec.drums && ! prevDrums && energy > 0.6f && sec.melodic)
+        else if (last && ! first && energy < 0.5f)
+            sec.name = "Outro";
+        else if (sec.drums && ! prevDrums && energy > 0.6f && (sec.melodic || sec.vocal))
             sec.name = "Drop";
+        else if (sec.vocal && sec.drums)
+            sec.name = energy > 0.75f ? "Hook" : "Verse";
         else if (sec.drums && ! prevDrums)
             sec.name = "Kick In";
         else if (! sec.drums && prevDrums)

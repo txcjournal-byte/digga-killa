@@ -16,6 +16,7 @@ namespace
         juce::String category, name;
         std::array<float, 4> features {};
         float centroid = 0.0f;
+        const juce::AudioBuffer<float>* from = nullptr;   // buffer to cut it from
     };
 
     juce::String noteName (int midi)
@@ -134,262 +135,479 @@ namespace
     }
 }
 
+namespace
+{
+    struct DrumScan
+    {
+        std::vector<Hit> hits;
+        std::vector<int> starts;   // every attack found
+    };
+
+    /** Drum hits of `source`, classified. In stem mode the source is the drum
+        stem: low hits are kicks (the 808 lives in the bass stem) and nothing
+        melodic plays on top. */
+    DrumScan scanDrums (const juce::AudioBuffer<float>& source, double sampleRate,
+                        const std::vector<midi::Note>& notes, bool stemMode)
+    {
+        DrumScan scan;
+        const int length = source.getNumSamples();
+        const auto monoBuffer = audio::toMono (source);
+        const float* mono = monoBuffer.getReadPointer (0);
+        const auto env = analysis::computeOnsets (mono, length, sampleRate);
+        const auto peaks = pickPeaks (env);
+        const float globalPeak = juce::jmax (1.0e-6f, audio::peak (monoBuffer));
+
+        auto& starts = scan.starts;
+        std::vector<float> lowStrength;
+        for (int frame : peaks)
+        {
+            starts.push_back (refineStart (mono, length, (int) (env.frameToSeconds (frame) * sampleRate), sampleRate));
+            float low = 0.0f;
+            for (int k = frame - 1; k <= frame + 2; ++k)
+                if (juce::isPositiveAndBelow (k, (int) env.lowFlux.size()))
+                    low = juce::jmax (low, env.lowFlux[(size_t) k]);
+            lowStrength.push_back (low);
+        }
+
+        auto pitchedAt = [&] (double from, double to, int minPitch, int maxPitch)
+        {
+            // strongest note sounding in this time range, -1 if none
+            int best = -1;
+            double bestOverlap = 0.0;
+            for (const auto& n : notes)
+            {
+                if (n.pitch < minPitch || n.pitch > maxPitch)
+                    continue;
+                const double overlap = juce::jmin (to, n.endSeconds) - juce::jmax (from, n.startSeconds);
+                if (overlap > bestOverlap)
+                {
+                    bestOverlap = overlap;
+                    best = n.pitch;
+                }
+            }
+            return bestOverlap > 0.5 * (to - from) ? best : -1;
+        };
+
+        auto melodicActivity = [&] (double from, double to)
+        {
+            int count = 0;
+            for (const auto& n : notes)
+                if (n.pitch >= 48 && n.endSeconds > from && n.startSeconds < to)
+                    ++count;
+            return count;
+        };
+
+        for (size_t i = 0; i < starts.size(); ++i)
+        {
+            Hit hit;
+            hit.from = &source;
+            hit.start = starts[i];
+            const int next = i + 1 < starts.size() ? starts[i + 1] : length;
+            hit.end = findEnd (mono, length, hit.start, next, sampleRate);
+            const int len = hit.end - hit.start;
+            if (len < (int) (0.04 * sampleRate))
+                continue;
+
+            const int attack = juce::jmin (len, (int) (0.1 * sampleRate));
+            const float attackPeak = monoBuffer.getMagnitude (0, hit.start, attack);
+            if (attackPeak < 0.08f * globalPeak)
+                continue;
+
+            const auto f = analysis::describe (mono + hit.start, attack, sampleRate);
+            const double t0 = hit.start / sampleRate, t1 = hit.end / sampleRate;
+
+            // category from where the attack's energy sits
+            // noise-like attacks are snares / hats even when a previous kick still rings underneath
+            const bool noisy = f.flatness > 0.5f;
+            const bool low = ! noisy && f.lowRatio > 0.45f && f.highRatio < 0.3f;
+            if (low)
+            {
+                // low hits ring until the next low hit: hats on top get filtered out below
+                int nextLow = length;
+                for (size_t j = i + 1; j < starts.size(); ++j)
+                    if (lowStrength[j] > 0.5f * lowStrength[i])
+                    {
+                        nextLow = starts[j];
+                        break;
+                    }
+                hit.end = findEnd (mono, length, hit.start, nextLow, sampleRate);
+            }
+
+            double lengthSec = (hit.end - hit.start) / sampleRate;
+            const double t1Low = hit.end / sampleRate;
+            if (low)
+            {
+                const int bass = stemMode ? -1 : pitchedAt (t0, t1Low, 21, 47);
+                hit.category = lengthSec > 0.35 && bass >= 0 ? "808" : "Kick";
+                if (hit.category == "Kick")
+                    hit.end = juce::jmin (hit.end, hit.start + (int) (0.7 * sampleRate));   // a kick, not the 808 under it
+                // the octave of a sub note is unreliable; the pitch class is what matters
+                hit.name = bass >= 0 && hit.category == "808" ? "808 " + pitchClassName (bass) : juce::String();
+                lengthSec = (hit.end - hit.start) / sampleRate;
+            }
+            else if (noisy || f.highRatio > 0.5f)
+            {
+                // noise: a hat is short and thin, a snare has body below the highs
+                if (lengthSec < 0.1)
+                    hit.category = "Hat";
+                else if (lengthSec < 0.3 && (f.midRatio > 0.08f || f.lowRatio > 0.3f))
+                    hit.category = "Snare";
+                else
+                    hit.category = "Open Hat";
+            }
+            else if (f.midRatio > 0.25f && f.flatness > 0.15f)
+                hit.category = "Snare";
+            else
+                hit.category = "Perc";
+
+            // quality: clean attack, nothing on top, full decay, loud enough
+            const int pre = juce::jmin (hit.start, (int) (0.03 * sampleRate));
+            const float before = rmsOf (mono + hit.start - pre, pre);
+            const float body = rmsOf (mono + hit.start, attack);
+            const float cleanAttack = 1.0f - juce::jlimit (0.0f, 1.0f, before / juce::jmax (1.0e-6f, body));
+            const bool fullDecay = hit.end < (low ? length : next);
+            const int clutter = hit.category == "808" || stemMode ? 0 : melodicActivity (t0, t1);
+
+            hit.quality = 0.9f * cleanAttack + (fullDecay ? 0.4f : 0.0f) + 0.4f * attackPeak / globalPeak
+                        - 0.25f * (float) juce::jmin (clutter, 4);
+            hit.centroid = f.centroid;
+            hit.features = { std::log2 (juce::jmax (40.0f, f.centroid)), f.flatness * 4.0f, f.lowRatio * 3.0f,
+                             std::log2 ((float) lengthSec + 0.05f) };
+            if (hit.category == "Kick" || hit.category == "808")
+                hit.quality += 0.6f * (float) juce::jmin (lengthSec, 0.5);   // full-bodied low hits
+            scan.hits.push_back (hit);
+        }
+        return scan;
+    }
+
+    /** Single notes and chords from the transcription, cut from `source`.
+        `drumStarts` (attacks in the same audio) make a note unusable. */
+    std::vector<Hit> scanTonal (const juce::AudioBuffer<float>& source, double sampleRate,
+                                const std::vector<midi::Note>& notes, const std::vector<int>& drumStarts)
+    {
+        std::vector<Hit> tonal;
+        const int length = source.getNumSamples();
+
+        for (size_t i = 0; i < notes.size(); ++i)
+        {
+            const auto& n = notes[i];
+            const double duration = n.endSeconds - n.startSeconds;
+            if (n.pitch < 48 || duration < 0.2 || n.amplitude < 0.35f)
+                continue;
+
+            // notes struck together with this one
+            std::vector<int> together { n.pitch };
+            for (const auto& m : notes)
+                if (&m != &n && m.pitch >= 40 && std::abs (m.startSeconds - n.startSeconds) < 0.05)
+                    together.push_back (m.pitch);
+            const bool lowest = *std::min_element (together.begin(), together.end()) == n.pitch;
+            if (together.size() >= 3 && ! lowest)
+                continue;   // a chord is represented by its lowest note
+
+            // drum hits inside the note make it unusable as a clean one-shot
+            int drums = 0;
+            for (int st : drumStarts)
+            {
+                const double t = st / sampleRate;
+                if (t > n.startSeconds + 0.03 && t < n.endSeconds)
+                    ++drums;
+            }
+
+            Hit hit;
+            hit.from = &source;
+            hit.start = juce::jmax (0, (int) ((n.startSeconds - 0.005) * sampleRate));
+            hit.end = juce::jmin (length, (int) ((juce::jmin (n.endSeconds, n.startSeconds + 2.5) + 0.15) * sampleRate));
+            if (hit.end - hit.start < (int) (0.15 * sampleRate))
+                continue;
+
+            if (together.size() >= 3)
+            {
+                const int root = n.pitch;
+                bool minorThird = false, majorThird = false;
+                for (int p : together)
+                {
+                    minorThird |= (p - root) % 12 == 3;
+                    majorThird |= (p - root) % 12 == 4;
+                }
+                hit.category = "Chord";
+                hit.name = "Chord " + pitchClassName (root) + (minorThird && ! majorThird ? "m" : "");
+            }
+            else if (together.size() == 1)
+            {
+                hit.category = "Note";
+                hit.name = "Note " + noteName (n.pitch);
+            }
+            else
+                continue;   // two-note dyads are ambiguous
+
+            hit.quality = n.amplitude + 0.3f * (float) juce::jmin (duration, 1.0) - 0.35f * (float) juce::jmin (drums, 4);
+            hit.centroid = 440.0f * std::pow (2.0f, (float) (n.pitch - 69) / 12.0f);
+            hit.features = { (float) n.pitch / 12.0f, (float) together.size(), 0.0f, (float) duration };
+            tonal.push_back (hit);
+        }
+        return tonal;
+    }
+
+    /** Fundamental of a bass note by normalised autocorrelation (25..250 Hz), -1 if unclear. */
+    int bassPitch (const float* mono, int length, int start, double sr)
+    {
+        const int from = start + (int) (0.03 * sr);
+        const int window = (int) (0.12 * sr);
+        const int minLag = (int) (sr / 250.0), maxLag = (int) (sr / 25.0);
+        if (from + window + maxLag >= length)
+            return -1;
+
+        double energy0 = 0.0;
+        for (int i = 0; i < window; ++i)
+            energy0 += (double) mono[from + i] * mono[from + i];
+        if (energy0 < 1.0e-9)
+            return -1;
+
+        int bestLag = -1;
+        double best = 0.0;
+        std::vector<double> acf ((size_t) (maxLag + 2), 0.0);
+        for (int lag = minLag; lag <= maxLag + 1; ++lag)
+        {
+            double num = 0.0, e1 = 0.0;
+            for (int i = 0; i < window; ++i)
+            {
+                num += (double) mono[from + i] * mono[from + i + lag];
+                e1 += (double) mono[from + i + lag] * mono[from + i + lag];
+            }
+            acf[(size_t) lag] = num / std::sqrt (energy0 * e1 + 1.0e-12);
+        }
+        // first strong peak (avoids picking a sub-octave)
+        double globalMax = 0.0;
+        for (int lag = minLag; lag <= maxLag; ++lag)
+            globalMax = juce::jmax (globalMax, acf[(size_t) lag]);
+        for (int lag = minLag + 1; lag <= maxLag; ++lag)
+            if (acf[(size_t) lag] >= acf[(size_t) lag - 1] && acf[(size_t) lag] >= acf[(size_t) lag + 1]
+                && acf[(size_t) lag] > 0.85 * globalMax)
+            {
+                bestLag = lag;
+                best = acf[(size_t) lag];
+                break;
+            }
+        if (bestLag < 0 || best < 0.6)
+            return -1;
+        const double f0 = sr / (double) bestLag;
+        return (int) std::lround (69.0 + 12.0 * std::log2 (f0 / 440.0));
+    }
+
+    /** 808 / bass notes: from attack to the next note or the end of the decay. */
+    std::vector<Hit> scanBass (const juce::AudioBuffer<float>& source, double sampleRate)
+    {
+        std::vector<Hit> hits;
+        const int length = source.getNumSamples();
+        const auto monoBuffer = audio::toMono (source);
+        const float* mono = monoBuffer.getReadPointer (0);
+        const auto env = analysis::computeOnsets (mono, length, sampleRate);
+        const auto peaks = pickPeaks (env);
+        const float globalPeak = juce::jmax (1.0e-6f, audio::peak (monoBuffer));
+
+        std::vector<int> starts;
+        for (int frame : peaks)
+            starts.push_back (refineStart (mono, length, (int) (env.frameToSeconds (frame) * sampleRate), sampleRate));
+
+        for (size_t i = 0; i < starts.size(); ++i)
+        {
+            Hit hit;
+            hit.from = &source;
+            hit.start = starts[i];
+            const int next = i + 1 < starts.size() ? starts[i + 1] : length;
+            hit.end = findEnd (mono, length, hit.start, next, sampleRate);
+            const double lengthSec = (hit.end - hit.start) / sampleRate;
+            if (lengthSec < 0.25)
+                continue;
+
+            const int attack = juce::jmin (hit.end - hit.start, (int) (0.1 * sampleRate));
+            const float attackPeak = monoBuffer.getMagnitude (0, hit.start, attack);
+            if (attackPeak < 0.15f * globalPeak)
+                continue;
+
+            const int pitch = bassPitch (mono, length, hit.start, sampleRate);
+            if (pitch < 0)
+                continue;
+
+            const int pre = juce::jmin (hit.start, (int) (0.03 * sampleRate));
+            const float before = rmsOf (mono + hit.start - pre, pre);
+            const float body = rmsOf (mono + hit.start, attack);
+            const float cleanAttack = 1.0f - juce::jlimit (0.0f, 1.0f, before / juce::jmax (1.0e-6f, body));
+            const bool fullDecay = hit.end < next;
+
+            hit.category = "808";
+            hit.name = "808 " + noteName (pitch);
+            hit.quality = 0.9f * cleanAttack + (fullDecay ? 0.4f : 0.0f) + 0.4f * attackPeak / globalPeak
+                        + 0.5f * (float) juce::jmin (lengthSec, 1.0);
+            hit.features = { (float) pitch / 12.0f, 0.0f, 0.0f, std::log2 ((float) lengthSec + 0.05f) };
+            hits.push_back (hit);
+        }
+        return hits;
+    }
+
+    /** Vocal phrases between breaths: 0.3 .. 3 s of continuous voice. */
+    std::vector<Hit> scanVocals (const juce::AudioBuffer<float>& source, double sampleRate)
+    {
+        std::vector<Hit> hits;
+        const int length = source.getNumSamples();
+        const auto monoBuffer = audio::toMono (source);
+        const float* mono = monoBuffer.getReadPointer (0);
+        const int block = juce::jmax (16, (int) (0.01 * sampleRate));
+        const int numBlocks = length / block;
+        if (numBlocks < 10)
+            return hits;
+
+        std::vector<float> rms ((size_t) numBlocks);
+        float loudest = 1.0e-9f;
+        for (int b = 0; b < numBlocks; ++b)
+        {
+            rms[(size_t) b] = rmsOf (mono + b * block, block);
+            loudest = juce::jmax (loudest, rms[(size_t) b]);
+        }
+
+        const float threshold = loudest * 0.06f;   // -24 dB
+        const int minGap = 12;                     // 120 ms of quiet ends a phrase
+        int b = 0;
+        while (b < numBlocks)
+        {
+            while (b < numBlocks && rms[(size_t) b] < threshold) ++b;
+            if (b >= numBlocks) break;
+            const int first = b;
+            int quiet = 0, last = b;
+            while (b < numBlocks && quiet < minGap)
+            {
+                if (rms[(size_t) b] >= threshold) { quiet = 0; last = b; }
+                else ++quiet;
+                ++b;
+            }
+
+            const double seconds = (last - first + 1) * block / sampleRate;
+            if (seconds < 0.3 || seconds > 3.0)
+                continue;
+
+            Hit hit;
+            hit.from = &source;
+            hit.start = juce::jmax (0, first * block - (int) (0.01 * sampleRate));
+            hit.end = juce::jmin (length, (last + 1) * block + (int) (0.06 * sampleRate));
+            float mean = 0.0f;
+            for (int k = first; k <= last; ++k)
+                mean += rms[(size_t) k];
+            mean /= (float) (last - first + 1);
+            hit.category = "Vocal";
+            hit.quality = mean / loudest + 0.3f * (float) juce::jmin (seconds, 1.5);
+            hit.features = { (float) hit.start / (float) juce::jmax (1, length) * 8.0f, 0.0f, 0.0f, (float) seconds };
+            hits.push_back (hit);
+        }
+        return hits;
+    }
+
+    struct Quota { const char* category; int count; };
+
+    void pick (std::vector<Shot>& shots, const std::vector<Hit>& all, std::initializer_list<Quota> quotas, double sampleRate)
+    {
+        for (const auto& quota : quotas)
+        {
+            std::vector<const Hit*> candidates;
+            for (const auto& h : all)
+                if (h.category == quota.category && h.quality > 0.2f)
+                    candidates.push_back (&h);
+            std::sort (candidates.begin(), candidates.end(), [] (const Hit* a, const Hit* b) { return a->quality > b->quality; });
+
+            std::vector<const Hit*> chosen;
+            for (const auto* c : candidates)
+            {
+                if ((int) chosen.size() >= quota.count)
+                    break;
+                bool tooSimilar = false;
+                for (const auto* o : chosen)
+                {
+                    float d = 0.0f;
+                    for (size_t k = 0; k < c->features.size(); ++k)
+                        d += std::abs (c->features[k] - o->features[k]);
+                    tooSimilar |= d < 0.35f || (c->name == o->name && c->name.isNotEmpty());
+                }
+                if (! tooSimilar)
+                    chosen.push_back (c);
+            }
+
+            std::sort (chosen.begin(), chosen.end(), [] (const Hit* a, const Hit* b) { return a->start < b->start; });
+            int index = 1;
+            for (const auto* c : chosen)
+            {
+                Shot shot;
+                shot.category = quota.category;
+                shot.name = c->name.isNotEmpty() ? c->name
+                          : chosen.size() > 1 ? juce::String (quota.category) + " " + juce::String (index) : juce::String (quota.category);
+                if (shot.category == "Vocal")
+                    shot.name = "Vox " + juce::String (index);
+                ++index;
+                shot.sourceSeconds = c->start / sampleRate;
+
+                const auto& source = *c->from;
+                const int len = c->end - c->start;
+                shot.audio.setSize (source.getNumChannels(), len);
+                for (int ch = 0; ch < source.getNumChannels(); ++ch)
+                    shot.audio.copyFrom (ch, 0, source, ch, c->start, len);
+
+                // spectral clean-up of what else was playing: low hits lose hat bleed
+                // after the click, hats lose low end
+                if (shot.category == "Kick" || shot.category == "808")
+                    cleanTail (shot.audio, sampleRate, true);
+                else if (shot.category == "Hat" || shot.category == "Open Hat")
+                    cleanTail (shot.audio, sampleRate, false);
+
+                audio::fadeIn (shot.audio, 0, juce::jmax (8, (int) (0.001 * sampleRate)));
+                audio::fadeOut (shot.audio, len, juce::jlimit (16, (int) (0.04 * sampleRate), len / 4));
+                audio::normalise (shot.audio, 0.944f);   // -0.5 dBFS
+                shots.push_back (std::move (shot));
+            }
+        }
+    }
+}
+
 std::vector<Shot> extract (const juce::AudioBuffer<float>& source, double sampleRate, const std::vector<midi::Note>& notes)
 {
     std::vector<Shot> shots;
-    const int length = source.getNumSamples();
-    if (length == 0)
+    if (source.getNumSamples() == 0)
         return shots;
 
-    const auto monoBuffer = audio::toMono (source);
-    const float* mono = monoBuffer.getReadPointer (0);
-    const auto env = analysis::computeOnsets (mono, length, sampleRate);
-    const auto peaks = pickPeaks (env);
-    const float globalPeak = juce::jmax (1.0e-6f, audio::peak (monoBuffer));
+    auto scan = scanDrums (source, sampleRate, notes, false);
+    const auto tonal = scanTonal (source, sampleRate, notes, scan.starts);
+    scan.hits.insert (scan.hits.end(), tonal.begin(), tonal.end());
 
-    std::vector<int> starts;
-    std::vector<float> lowStrength;
-    for (int frame : peaks)
+    pick (shots, scan.hits, { { "Kick", 2 }, { "808", 2 }, { "Snare", 2 }, { "Hat", 2 }, { "Open Hat", 1 },
+                              { "Perc", 1 }, { "Chord", 2 }, { "Note", 3 } }, sampleRate);
+    return shots;
+}
+
+std::vector<Shot> extractFromStems (const StemSet& stems, double sampleRate, const std::vector<midi::Note>& melodyNotes)
+{
+    std::vector<Shot> shots;
+    std::vector<Hit> all;
+
+    if (stems.drums != nullptr && stems.hasDrums)
     {
-        starts.push_back (refineStart (mono, length, (int) (env.frameToSeconds (frame) * sampleRate), sampleRate));
-        float low = 0.0f;
-        for (int k = frame - 1; k <= frame + 2; ++k)
-            if (juce::isPositiveAndBelow (k, (int) env.lowFlux.size()))
-                low = juce::jmax (low, env.lowFlux[(size_t) k]);
-        lowStrength.push_back (low);
+        auto scan = scanDrums (*stems.drums, sampleRate, {}, true);
+        all.insert (all.end(), scan.hits.begin(), scan.hits.end());
+    }
+    if (stems.bass != nullptr && stems.hasBass)
+    {
+        const auto bass = scanBass (*stems.bass, sampleRate);
+        all.insert (all.end(), bass.begin(), bass.end());
+    }
+    if (stems.melody != nullptr && stems.hasMelody)
+    {
+        const auto tonal = scanTonal (*stems.melody, sampleRate, melodyNotes, {});
+        all.insert (all.end(), tonal.begin(), tonal.end());
+    }
+    if (stems.vocals != nullptr && stems.hasVocals)
+    {
+        const auto vox = scanVocals (*stems.vocals, sampleRate);
+        all.insert (all.end(), vox.begin(), vox.end());
     }
 
-    auto pitchedAt = [&] (double from, double to, int minPitch, int maxPitch)
-    {
-        // strongest note sounding in this time range, -1 if none
-        int best = -1;
-        double bestOverlap = 0.0;
-        for (const auto& n : notes)
-        {
-            if (n.pitch < minPitch || n.pitch > maxPitch)
-                continue;
-            const double overlap = juce::jmin (to, n.endSeconds) - juce::jmax (from, n.startSeconds);
-            if (overlap > bestOverlap)
-            {
-                bestOverlap = overlap;
-                best = n.pitch;
-            }
-        }
-        return bestOverlap > 0.5 * (to - from) ? best : -1;
-    };
-
-    auto melodicActivity = [&] (double from, double to)
-    {
-        int count = 0;
-        for (const auto& n : notes)
-            if (n.pitch >= 48 && n.endSeconds > from && n.startSeconds < to)
-                ++count;
-        return count;
-    };
-
-    // ---------------------------------------------------------------- drum hits
-    std::vector<Hit> hits;
-    for (size_t i = 0; i < starts.size(); ++i)
-    {
-        Hit hit;
-        hit.start = starts[i];
-        const int next = i + 1 < starts.size() ? starts[i + 1] : length;
-        hit.end = findEnd (mono, length, hit.start, next, sampleRate);
-        const int len = hit.end - hit.start;
-        if (len < (int) (0.04 * sampleRate))
-            continue;
-
-        const int attack = juce::jmin (len, (int) (0.1 * sampleRate));
-        const float attackPeak = monoBuffer.getMagnitude (0, hit.start, attack);
-        if (attackPeak < 0.08f * globalPeak)
-            continue;
-
-        const auto f = analysis::describe (mono + hit.start, attack, sampleRate);
-        const double t0 = hit.start / sampleRate, t1 = hit.end / sampleRate;
-
-        // category from where the attack's energy sits
-        // noise-like attacks are snares / hats even when a previous kick still rings underneath
-        const bool noisy = f.flatness > 0.5f;
-        const bool low = ! noisy && f.lowRatio > 0.45f && f.highRatio < 0.3f;
-        if (low)
-        {
-            // low hits ring until the next low hit: hats on top get filtered out below
-            int nextLow = length;
-            for (size_t j = i + 1; j < starts.size(); ++j)
-                if (lowStrength[j] > 0.5f * lowStrength[i])
-                {
-                    nextLow = starts[j];
-                    break;
-                }
-            hit.end = findEnd (mono, length, hit.start, nextLow, sampleRate);
-        }
-
-        double lengthSec = (hit.end - hit.start) / sampleRate;
-        const double t1Low = hit.end / sampleRate;
-        if (low)
-        {
-            const int bass = pitchedAt (t0, t1Low, 21, 47);
-            hit.category = lengthSec > 0.35 && bass >= 0 ? "808" : "Kick";
-            if (hit.category == "Kick")
-                hit.end = juce::jmin (hit.end, hit.start + (int) (0.7 * sampleRate));   // a kick, not the 808 under it
-            // the octave of a sub note is unreliable; the pitch class is what matters
-            hit.name = bass >= 0 && hit.category == "808" ? "808 " + pitchClassName (bass) : juce::String();
-            lengthSec = (hit.end - hit.start) / sampleRate;
-        }
-        else if (noisy || f.highRatio > 0.5f)
-        {
-            // noise: a hat is short and thin, a snare has body below the highs
-            if (lengthSec < 0.1)
-                hit.category = "Hat";
-            else if (lengthSec < 0.3 && (f.midRatio > 0.08f || f.lowRatio > 0.3f))
-                hit.category = "Snare";
-            else
-                hit.category = "Open Hat";
-        }
-        else if (f.midRatio > 0.25f && f.flatness > 0.15f)
-            hit.category = "Snare";
-        else
-            hit.category = "Perc";
-
-        // quality: clean attack, nothing on top, full decay, loud enough
-        const int pre = juce::jmin (hit.start, (int) (0.03 * sampleRate));
-        const float before = rmsOf (mono + hit.start - pre, pre);
-        const float body = rmsOf (mono + hit.start, attack);
-        const float cleanAttack = 1.0f - juce::jlimit (0.0f, 1.0f, before / juce::jmax (1.0e-6f, body));
-        const bool fullDecay = hit.end < (low ? length : next);
-        const int clutter = hit.category == "808" ? 0 : melodicActivity (t0, t1);
-
-        hit.quality = 0.9f * cleanAttack + (fullDecay ? 0.4f : 0.0f) + 0.4f * attackPeak / globalPeak
-                    - 0.25f * (float) juce::jmin (clutter, 4);
-        hit.centroid = f.centroid;
-        hit.features = { std::log2 (juce::jmax (40.0f, f.centroid)), f.flatness * 4.0f, f.lowRatio * 3.0f,
-                         std::log2 ((float) lengthSec + 0.05f) };
-        if (hit.category == "Kick" || hit.category == "808")
-            hit.quality += 0.6f * (float) juce::jmin (lengthSec, 0.5);   // full-bodied low hits
-        hits.push_back (hit);
-    }
-
-    // ---------------------------------------------------------------- notes & chords
-    std::vector<Hit> tonal;
-    for (size_t i = 0; i < notes.size(); ++i)
-    {
-        const auto& n = notes[i];
-        const double duration = n.endSeconds - n.startSeconds;
-        if (n.pitch < 48 || duration < 0.2 || n.amplitude < 0.35f)
-            continue;
-
-        // notes struck together with this one
-        std::vector<int> together { n.pitch };
-        for (const auto& m : notes)
-            if (&m != &n && m.pitch >= 40 && std::abs (m.startSeconds - n.startSeconds) < 0.05)
-                together.push_back (m.pitch);
-        const bool lowest = *std::min_element (together.begin(), together.end()) == n.pitch;
-        if (together.size() >= 3 && ! lowest)
-            continue;   // a chord is represented by its lowest note
-
-        // drum hits inside the note make it unusable as a clean one-shot
-        int drums = 0;
-        for (int s : starts)
-        {
-            const double t = s / sampleRate;
-            if (t > n.startSeconds + 0.03 && t < n.endSeconds)
-                ++drums;
-        }
-
-        Hit hit;
-        hit.start = juce::jmax (0, (int) ((n.startSeconds - 0.005) * sampleRate));
-        hit.end = juce::jmin (length, (int) ((juce::jmin (n.endSeconds, n.startSeconds + 2.5) + 0.15) * sampleRate));
-        if (hit.end - hit.start < (int) (0.15 * sampleRate))
-            continue;
-
-        if (together.size() >= 3)
-        {
-            const int root = n.pitch;
-            bool minorThird = false, majorThird = false;
-            for (int p : together)
-            {
-                minorThird |= (p - root) % 12 == 3;
-                majorThird |= (p - root) % 12 == 4;
-            }
-            hit.category = "Chord";
-            hit.name = "Chord " + pitchClassName (root) + (minorThird && ! majorThird ? "m" : "");
-        }
-        else if (together.size() == 1)
-        {
-            hit.category = "Note";
-            hit.name = "Note " + noteName (n.pitch);
-        }
-        else
-            continue;   // two-note dyads are ambiguous
-
-        hit.quality = n.amplitude + 0.3f * (float) juce::jmin (duration, 1.0) - 0.35f * (float) juce::jmin (drums, 4);
-        hit.centroid = 440.0f * std::pow (2.0f, (float) (n.pitch - 69) / 12.0f);
-        hit.features = { (float) n.pitch / 12.0f, (float) together.size(), 0.0f, (float) duration };
-        tonal.push_back (hit);
-    }
-
-    // ---------------------------------------------------------------- pick per category
-    struct Quota { const char* category; int count; };
-    static constexpr Quota quotas[] = { { "Kick", 2 }, { "808", 2 }, { "Snare", 2 }, { "Hat", 2 }, { "Open Hat", 1 },
-                                        { "Perc", 1 }, { "Chord", 2 }, { "Note", 3 } };
-
-    std::vector<Hit> all (hits);
-    all.insert (all.end(), tonal.begin(), tonal.end());
-
-    for (const auto& quota : quotas)
-    {
-        std::vector<const Hit*> candidates;
-        for (const auto& h : all)
-            if (h.category == quota.category && h.quality > 0.2f)
-                candidates.push_back (&h);
-        std::sort (candidates.begin(), candidates.end(), [] (const Hit* a, const Hit* b) { return a->quality > b->quality; });
-
-        std::vector<const Hit*> chosen;
-        for (const auto* c : candidates)
-        {
-            if ((int) chosen.size() >= quota.count)
-                break;
-            bool tooSimilar = false;
-            for (const auto* o : chosen)
-            {
-                float d = 0.0f;
-                for (size_t k = 0; k < c->features.size(); ++k)
-                    d += std::abs (c->features[k] - o->features[k]);
-                tooSimilar |= d < 0.35f || (c->name == o->name && c->name.isNotEmpty());
-            }
-            if (! tooSimilar)
-                chosen.push_back (c);
-        }
-
-        int index = 1;
-        for (const auto* c : chosen)
-        {
-            Shot shot;
-            shot.category = quota.category;
-            shot.name = c->name.isNotEmpty() ? c->name
-                      : chosen.size() > 1 ? juce::String (quota.category) + " " + juce::String (index) : juce::String (quota.category);
-            ++index;
-            shot.sourceSeconds = c->start / sampleRate;
-
-            const int len = c->end - c->start;
-            shot.audio.setSize (source.getNumChannels(), len);
-            for (int ch = 0; ch < source.getNumChannels(); ++ch)
-                shot.audio.copyFrom (ch, 0, source, ch, c->start, len);
-
-            // spectral clean-up of what else was playing: low hits lose hat bleed
-            // after the click, hats lose low end
-            if (shot.category == "Kick" || shot.category == "808")
-                cleanTail (shot.audio, sampleRate, true);
-            else if (shot.category == "Hat" || shot.category == "Open Hat")
-                cleanTail (shot.audio, sampleRate, false);
-
-            audio::fadeIn (shot.audio, 0, juce::jmax (8, (int) (0.001 * sampleRate)));
-            audio::fadeOut (shot.audio, len, juce::jlimit (16, (int) (0.04 * sampleRate), len / 4));
-            audio::normalise (shot.audio, 0.944f);   // -0.5 dBFS
-            shots.push_back (std::move (shot));
-        }
-    }
-
+    pick (shots, all, { { "Kick", 4 }, { "Snare", 3 }, { "Hat", 3 }, { "Open Hat", 2 }, { "Perc", 3 },
+                        { "808", 4 }, { "Chord", 4 }, { "Note", 4 }, { "Vocal", 6 } }, sampleRate);
     return shots;
 }
 

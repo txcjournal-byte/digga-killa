@@ -123,7 +123,9 @@ static int stemsTool (char** argv)
 {
     const auto cwd = juce::File::getCurrentWorkingDirectory();
     stems::Separator separator;
+    const auto loadStart = juce::Time::getMillisecondCounterHiRes();
     if (! separator.load (cwd.getChildFile (argv[2]))) { std::printf ("model load FAILED\n"); return 1; }
+    std::printf ("  model loaded in %.0f ms\n", juce::Time::getMillisecondCounterHiRes() - loadStart);
 
     const auto refDir = cwd.getChildFile (argv[3]);
     juce::MemoryBlock input;

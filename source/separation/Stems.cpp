@@ -298,6 +298,48 @@ namespace
 }
 
 //==============================================================================
+void CompactAudio::assign (const juce::AudioBuffer<float>& audio)
+{
+    channels = audio.getNumChannels();
+    length = audio.getNumSamples();
+    float peak = 0.0f;
+    for (int ch = 0; ch < channels; ++ch)
+        peak = juce::jmax (peak, audio.getMagnitude (ch, 0, length));
+    scale = peak > 1.0e-9f ? peak / 32767.0f : 1.0f;
+
+    data.resize ((size_t) channels * (size_t) length);
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        const float* src = audio.getReadPointer (ch);
+        for (int i = 0; i < length; ++i)
+            data[(size_t) i * (size_t) channels + (size_t) ch] = (int16_t) juce::jlimit (-32767, 32767, (int) std::lround (src[i] / scale));
+    }
+}
+
+void CompactAudio::addTo (juce::AudioBuffer<float>& dst, int dstStart, int srcStart, int numSamples, float gain) const
+{
+    if (gain <= 0.0f || channels == 0)
+        return;
+    const float g = gain * scale;
+    const int from = juce::jmax (0, -srcStart), to = juce::jmin (numSamples, length - srcStart);
+    for (int ch = 0; ch < dst.getNumChannels(); ++ch)
+    {
+        const int src = juce::jmin (ch, channels - 1);
+        float* d = dst.getWritePointer (ch, dstStart);
+        for (int i = from; i < to; ++i)
+            d[i] += g * (float) data[(size_t) (srcStart + i) * (size_t) channels + (size_t) src];
+    }
+}
+
+juce::AudioBuffer<float> SongStems::mix (int start, int numSamples, const std::array<float, numStems>& gains) const
+{
+    juce::AudioBuffer<float> out (channels, juce::jmax (0, numSamples));
+    out.clear();
+    for (int s = 0; s < numStems; ++s)
+        stems[(size_t) s].addTo (out, 0, start, numSamples, gains[(size_t) s]);
+    return out;
+}
+
 Separator::Separator() = default;
 Separator::~Separator() = default;
 
@@ -422,7 +464,7 @@ bool Separator::separate (const juce::AudioBuffer<float>& audio, double sampleRa
             x.copyFrom (ch, 0, audio, src, 0, numIn);
         else
         {
-            juce::Interpolators::WindowedSinc interpolator;
+            juce::Interpolators::Lagrange interpolator;
             interpolator.process (ratio, audio.getReadPointer (src), x.getWritePointer (ch), N, numIn, 0);
         }
     }
@@ -589,7 +631,7 @@ bool Separator::separate (const juce::AudioBuffer<float>& audio, double sampleRa
                 out[(size_t) s].copyFrom (ch, 0, stemAudio[s], src, 0, numIn);
             else
             {
-                juce::Interpolators::WindowedSinc interpolator;
+                juce::Interpolators::Lagrange interpolator;
                 interpolator.process (backRatio, stemAudio[s].getReadPointer (src), out[(size_t) s].getWritePointer (ch), numIn, N, 0);
             }
         }
