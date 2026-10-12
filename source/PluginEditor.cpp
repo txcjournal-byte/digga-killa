@@ -17,6 +17,7 @@ TrapWinEditor::TrapWinEditor (TrapWinProcessor& p)
     if (auto* sizeConstrainer = getConstrainer())
         sizeConstrainer->setFixedAspectRatio (aspect);
 
+    openedWithoutSavedSize = p.getEditorWidth() <= 0;
     const int width = initialWidth (p.getEditorWidth());
     setSize (width, juce::roundToInt (width / aspect));
     sizeReady = true;
@@ -63,8 +64,10 @@ void TrapWinEditor::parentHierarchyChanged()
     juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->fitToScreen(); });
 }
 
-// Shrinks the window if, as actually shown by the host (including any scaling
-// the host adds), it is taller or wider than the screen it is on.
+// Sizes the window from how big it really is on screen (including any scaling
+// the host adds): on first open it fills about 88 % of the screen height, as big
+// and readable as possible while still fully visible; a size the user chose is
+// only ever shrunk, and only if it no longer fits.
 void TrapWinEditor::fitToScreen()
 {
     const auto onScreen = getScreenBounds();
@@ -76,13 +79,14 @@ void TrapWinEditor::fitToScreen()
         return;
 
     const auto area = display->userArea;
-    const double ratio = juce::jmin (area.getWidth() * 0.80 / onScreen.getWidth(),
-                                     area.getHeight() * 0.80 / onScreen.getHeight());
-    if (ratio >= 1.0)
+    const double ratio = juce::jmin (area.getWidth() * 0.94 / onScreen.getWidth(),
+                                     area.getHeight() * 0.88 / onScreen.getHeight());
+    const bool userSized = processor.getEditorWidth() > 0 && ! openedWithoutSavedSize;
+    if (std::abs (ratio - 1.0) < 0.03 || (userSized && ratio >= 1.0))
         return;
 
     constexpr double aspect = (double) MainView::logicalWidth / (double) MainView::logicalHeight;
-    const int width = juce::jmax (MainView::logicalWidth * 6 / 10, (int) (getWidth() * ratio));
+    const int width = juce::jlimit (MainView::logicalWidth * 6 / 10, MainView::logicalWidth * 2, (int) (getWidth() * ratio));
     setSize (width, juce::roundToInt (width / aspect));
 }
 

@@ -24,6 +24,7 @@ private:
     TrapWinProcessor& processor;
     bool sizeReady = false;
     bool fittedToScreen = false;
+    bool openedWithoutSavedSize = true;
     TrapWinLookAndFeel lookAndFeel;
     MainView view;
 
