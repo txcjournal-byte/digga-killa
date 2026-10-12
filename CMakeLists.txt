@@ -73,6 +73,7 @@ target_sources(TrapWinSampler PRIVATE
     source/dsp/Stretcher.cpp
     source/export/Exporter.cpp
     source/midi/BasicPitch.cpp
+    source/separation/Stems.cpp
     source/midi/MidiExport.cpp
     source/playback/SamplePlayer.cpp
     source/playback/ClipPlayer.cpp
@@ -89,7 +90,8 @@ target_sources(TrapWinSampler PRIVATE
 target_include_directories(TrapWinSampler PRIVATE source)
 target_include_directories(TrapWinSampler SYSTEM PRIVATE
     third_party/signalsmith-stretch/include
-    third_party/signalsmith-linear/include)
+    third_party/signalsmith-linear/include
+    third_party/eigen)
 
 target_compile_definitions(TrapWinSampler PUBLIC
     JUCE_WEB_BROWSER=0
@@ -98,6 +100,8 @@ target_compile_definitions(TrapWinSampler PUBLIC
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_USE_FLAC=1
     JUCE_USE_OGGVORBIS=0
+    EIGEN_MPL2_ONLY=1
+    EIGEN_DONT_PARALLELIZE=1
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
 target_link_libraries(TrapWinSampler

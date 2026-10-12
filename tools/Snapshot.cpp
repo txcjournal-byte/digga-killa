@@ -7,6 +7,7 @@
 #include "export/Exporter.h"
 #include "midi/BasicPitch.h"
 #include "midi/MidiExport.h"
+#include "separation/Stems.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -115,8 +116,81 @@ static int basicPitchTool (char** argv)
     return 0;
 }
 
+/** stems <model.bin> <refDir> <song.wav> <outDir>: U-Net parity against the TensorFlow
+    reference (refDir/input.f32, refDir/<stem>.f32 from tools/export_spleeter.py) and a full
+    separation of the song (timing, stems sum back to the mix, stem WAVs). */
+static int stemsTool (char** argv)
+{
+    const auto cwd = juce::File::getCurrentWorkingDirectory();
+    stems::Separator separator;
+    if (! separator.load (cwd.getChildFile (argv[2]))) { std::printf ("model load FAILED\n"); return 1; }
+
+    const auto refDir = cwd.getChildFile (argv[3]);
+    juce::MemoryBlock input;
+    refDir.getChildFile ("input.f32").loadFileAsData (input);
+    const size_t n = (size_t) 2 * stems::Separator::segmentFrames * stems::Separator::modelBins;
+    int failed = 0;
+    std::vector<float> out (n);
+    for (int s = 0; s < stems::numStems; ++s)
+    {
+        juce::MemoryBlock ref;
+        refDir.getChildFile (juce::String ("ref_") + juce::String (s) + ".f32").loadFileAsData (ref);
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+        separator.runNetwork (s, static_cast<const float*> (input.getData()), out.data());
+        const auto* r = static_cast<const float*> (ref.getData());
+        double maxErr = 0.0, maxRef = 0.0;
+        for (size_t i = 0; i < n; ++i) { maxErr = std::max (maxErr, (double) std::abs (out[i] - r[i])); maxRef = std::max (maxRef, (double) std::abs (r[i])); }
+        const bool ok = maxErr <= 1.0e-2 * std::max (1.0, maxRef);
+        failed += ok ? 0 : 1;
+        std::printf ("  %-6s max err %.3g (ref max %.3g) %.0f ms  %s\n", stems::stemName (s), maxErr, maxRef,
+                     juce::Time::getMillisecondCounterHiRes() - start, ok ? "ok" : "FAILED");
+    }
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (cwd.getChildFile (argv[4])));
+    if (reader == nullptr) { std::printf ("song load FAILED\n"); return 1; }
+    juce::AudioBuffer<float> song ((int) reader->numChannels, (int) reader->lengthInSamples);
+    reader->read (&song, 0, song.getNumSamples(), 0, true, true);
+
+    stems::StemBuffers result;
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    separator.separate (song, reader->sampleRate, result);
+    const double seconds = (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0;
+    std::printf ("  separated %.1f s of audio in %.1f s\n", song.getNumSamples() / reader->sampleRate, seconds);
+
+    double err = 0.0, ref = 0.0;
+    for (int ch = 0; ch < song.getNumChannels(); ++ch)
+        for (int i = 4096; i < song.getNumSamples() - 4096; ++i)
+        {
+            float sum = 0.0f;
+            for (auto& b : result) sum += b.getSample (ch, i);
+            err += (double) (sum - song.getSample (ch, i)) * (sum - song.getSample (ch, i));
+            ref += (double) song.getSample (ch, i) * song.getSample (ch, i);
+        }
+    const double snr = 10.0 * std::log10 (ref / std::max (err, 1.0e-20));
+    std::printf ("  stems sum back to the mix: %.1f dB SNR  %s\n", snr, snr > 40.0 ? "ok" : "FAILED");
+    failed += snr > 40.0 ? 0 : 1;
+
+    const auto outDir = cwd.getChildFile (argv[5]);
+    outDir.createDirectory();
+    for (int s = 0; s < stems::numStems; ++s)
+    {
+        const auto file = outDir.getChildFile (juce::String ("stem_") + stems::stemName (s) + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (new juce::FileOutputStream (file),
+            reader->sampleRate, (unsigned int) song.getNumChannels(), 16, {}, 0));
+        writer->writeFromAudioSampleBuffer (result[(size_t) s], 0, song.getNumSamples());
+    }
+    std::printf (failed == 0 ? "STEMS OK\n" : "STEMS FAILED\n");
+    return failed == 0 ? 0 : 1;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 5 && juce::String (argv[1]) == "stems")
+        return stemsTool (argv);
     if (argc > 3 && juce::String (argv[1]).startsWith ("bp"))
         return basicPitchTool (argv);
 
