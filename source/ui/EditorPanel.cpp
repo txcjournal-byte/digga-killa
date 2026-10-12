@@ -367,8 +367,6 @@ void EditorPanel::paint (juce::Graphics& g)
             info << dot << "fx on";
         drawMonoLabel (g, info, label, juce::Justification::topLeft, muted, 10.0f);
 
-        drawMonoLabel (g, "Drag", dragRaw.getBounds().toFloat().translated (-44.0f, 0.0f).withWidth (40.0f),
-                       juce::Justification::centredRight, muted, 9.5f);
     }
 
     // slider captions (wave view)

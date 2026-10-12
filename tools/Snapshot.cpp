@@ -8,6 +8,7 @@
 #include "midi/BasicPitch.h"
 #include "midi/MidiExport.h"
 #include "separation/Stems.h"
+#include "ui/EditorPanel.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -29,6 +30,19 @@ namespace
         T value {};
         onMessageThread ([&] { value = fn(); });
         return value;
+    }
+
+    template <typename T>
+    T* findChild (juce::Component& parent)
+    {
+        for (auto* c : parent.getChildren())
+        {
+            if (auto* t = dynamic_cast<T*> (c))
+                return t;
+            if (auto* t = findChild<T> (*c))
+                return t;
+        }
+        return nullptr;
     }
 
     void save (juce::Component& c, const juce::File& file, float scale = 1.0f)
@@ -260,6 +274,33 @@ int main (int argc, char** argv)
                    "crop keeps exactly the chosen half");
             wait (300);
             onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_loaded.png")); save (*editor, outDir.getChildFile ("ui_cover.png"), 2.0f); });
+
+            std::printf ("\nWAVE / MIDI / FX VIEWS\n");
+            auto* panel = query<EditorPanel*> ([&] { return findChild<EditorPanel> (*editor); });
+            check (panel != nullptr, "editor panel found");
+            onMessageThread ([&]
+            {
+                auto e = engine.find (firstLoop)->edit;
+                e.loopStart = 0.25;
+                juce::Random r (7);
+                e.fx = fx::randomise (r, 1);
+                e.fx.delayOn = true;
+                engine.setEdit (firstLoop, e);
+            });
+            check (waitUntil ([&] { const auto* i = engine.find (firstLoop); return i->edited != i->dry && i->dry != nullptr; }, 60000),
+                   "FX render keeps a dry copy for raw drags");
+            check (query<bool> ([&] { const auto* i = engine.find (firstLoop); return i->edited->getNumSamples() == i->dry->getNumSamples(); }),
+                   "loop with FX keeps its length");
+            onMessageThread ([&] { panel->setView (EditorPanel::View::fx); });
+            wait (400);
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_fx.png")); });
+            onMessageThread ([&] { panel->setView (EditorPanel::View::midi); });
+            check (waitUntil ([&] { return query<bool> ([&] { return ! panel->getMidiView().getNotes().empty(); }); }, 120000),
+                   "MIDI shredder shows the loop's notes");
+            wait (300);
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_midi.png")); panel->setView (EditorPanel::View::wave); });
+            wait (300);
+            onMessageThread ([&] { save (*editor, outDir.getChildFile ("ui_wave.png")); });
 
             std::printf ("\nPLAYBACK\n");
             onMessageThread ([&] { processor.getClipPlayer().preview (firstLoop); });
