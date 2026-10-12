@@ -13,6 +13,13 @@ namespace digga::fx
     hear is what you drag. Modules run in this order. */
 struct FxSettings
 {
+    // TIME (tape-style varispeed, pitch follows): 0 off, 1 half speed, 2 quarter speed, 3 double speed.
+    // Loops keep their length (the first half / quarter gets stretched, or the loop plays twice);
+    // one-shots get longer / shorter.
+    int timeMode = 0;
+    // REPEAT (beat-repeat stutter): 0 off, 1 1/2, 2 1/4, 3 1/8, 4 1/16, 5 1/32 note. In every segment
+    // of max (1 beat, 2 slices) from the sample start, the first slice repeats to fill the segment.
+    int repeatRate = 0;
     // FILTER: 0 low-pass, 1 high-pass, 2 band-pass
     bool filterOn = false;  int filterType = 0;  float filterFreq = 2000.0f;  float filterReso = 0.7f;
     // DRIVE: 0 tape, 1 tube, 2 hard clip; amount 0..1, mix 0..1
@@ -39,12 +46,14 @@ struct FxSettings
 };
 
 /** Offline render of the rack into `audio` (in place, stereo or mono).
-    `bpm` syncs delay / gate / tape stop; `loop` = true makes delay and
-    reverb tails wrap around to the start so the result still loops
-    seamlessly (one-shots instead get their tail appended). */
+    `bpm` syncs repeat / delay / gate / tape stop; `loop` = true keeps the
+    length (time) and makes delay and reverb tails wrap around to the start
+    so the result still loops seamlessly (one-shots instead change length
+    with the time module and get their tail appended). */
 void process (juce::AudioBuffer<float>& audio, const FxSettings& settings, double sampleRate, double bpm, bool loop);
 
-/** KILL: a new, musical random rack. strength 0 subtle .. 2 extreme. */
+/** KILL: a new, musical random rack built from the simple modules the rack
+    shows (time, repeat, filter, delay, reverb). strength 0 subtle .. 2 extreme. */
 FxSettings randomise (juce::Random& random, int strength);
 
 } // namespace digga::fx

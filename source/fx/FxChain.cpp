@@ -12,7 +12,8 @@ namespace digga::fx
 // ==============================================================================
 bool FxSettings::anyOn() const noexcept
 {
-    return filterOn || driveOn || crushOn || gateOn || tapeStopOn || delayOn || reverbOn || widthOn;
+    return timeMode != 0 || repeatRate != 0
+        || filterOn || driveOn || crushOn || gateOn || tapeStopOn || delayOn || reverbOn || widthOn;
 }
 
 bool FxSettings::isDefault() const noexcept { return *this == FxSettings {}; }
@@ -32,6 +33,7 @@ namespace
         { "widthOn", &FxSettings::widthOn } };
 
     constexpr IntField intFields[] {
+        { "timeMode", &FxSettings::timeMode, 0, 3 },     { "repeatRate", &FxSettings::repeatRate, 0, 5 },
         { "filterType", &FxSettings::filterType, 0, 2 }, { "driveType", &FxSettings::driveType, 0, 2 },
         { "gateRate", &FxSettings::gateRate, 0, 3 },     { "delayRate", &FxSettings::delayRate, 0, 4 } };
 
@@ -125,6 +127,147 @@ namespace
                 (void) tick (ch, d[i]);
             for (int i = 0; i < numSamples; ++i)
                 d[i] = tick (ch, d[i]);
+        }
+    }
+
+    // ---- TIME: tape-style varispeed (halftime / double time)
+    double timeRatio (int mode) { return mode == 1 ? 0.5 : (mode == 2 ? 0.25 : 2.0); }
+
+    /** 8th-order Butterworth low-pass at 0.21 x sr: keeps double speed from aliasing. */
+    void antiAlias (juce::AudioBuffer<float>& audio, int n, double sr, bool loop)
+    {
+        static constexpr double qs[] { 0.5098, 0.6013, 0.9000, 2.5629 };
+        std::vector<std::array<juce::IIRFilter, 4>> stages ((size_t) audio.getNumChannels());
+        for (auto& chain : stages)
+            for (size_t i = 0; i < chain.size(); ++i)
+                chain[i].setCoefficients (juce::IIRCoefficients::makeLowPass (sr, sr * 0.21, qs[i]));
+
+        runStage (audio, n, loop, (int) sr, [&] (int ch, float x)
+        {
+            for (auto& f : stages[(size_t) ch])
+                x = f.processSingleSampleRaw (x);
+            return x;
+        });
+    }
+
+    /** Raised-cosine fade-in weight for sample i of a fade of `len` samples. */
+    float fadeIn (int i, int len) noexcept
+    {
+        return 0.5f - 0.5f * std::cos (pi * ((float) i + 0.5f) / (float) len);
+    }
+
+    void processTime (juce::AudioBuffer<float>& audio, const FxSettings& s, double sr, bool loop)
+    {
+        const int n = audio.getNumSamples();
+        const int chans = audio.getNumChannels();
+        if (n < 4)
+            return;
+
+        const double ratio = timeRatio (s.timeMode);
+        juce::AudioBuffer<float> src (audio);
+        if (ratio > 1.0)
+            antiAlias (src, n, sr, loop);
+
+        // loops keep their length; one-shots get longer (slower) or shorter (faster)
+        const int outN = loop ? n : juce::jmax (1, (int) std::ceil ((double) n / ratio));
+        const int xf = loop ? juce::jmin ((int) (sr * 0.006), n / 8) : 0;
+        audio.setSize (chans, outN, false, false, true);
+
+        for (int ch = 0; ch < chans; ++ch)
+        {
+            const auto* in = src.getReadPointer (ch);
+            auto* out = audio.getWritePointer (ch);
+            const auto at = [&] (long long k) noexcept
+            {
+                if (loop)
+                    return in[(size_t) (((k % n) + n) % n)];
+                return k >= 0 && k < n ? in[(size_t) k] : 0.0f;
+            };
+            // 4-point, 3rd-order Lagrange
+            const auto read = [&] (double pos) noexcept
+            {
+                const auto i0 = (long long) std::floor (pos);
+                const float t = (float) (pos - (double) i0);
+                const float ym1 = at (i0 - 1), y0 = at (i0), y1 = at (i0 + 1), y2 = at (i0 + 2);
+                const float tm1 = t - 1.0f, tm2 = t - 2.0f, tp1 = t + 1.0f;
+                return -t * tm1 * tm2 / 6.0f * ym1 + tp1 * tm1 * tm2 * 0.5f * y0
+                     - tp1 * t * tm2 * 0.5f * y1 + tp1 * t * tm1 / 6.0f * y2;
+            };
+
+            for (int i = 0; i < outN; ++i)
+                out[i] = read ((double) i * ratio);
+
+            // the wrap: the loop's start continues where its end was heading, then fades
+            // into the real start (a no-op for double speed, which ends where it began)
+            for (int i = 0; i < xf; ++i)
+            {
+                const float a = fadeIn (i, xf);
+                out[i] = out[i] * a + read ((double) (n + i) * ratio) * (1.0f - a);
+            }
+        }
+    }
+
+    // ---- REPEAT: beat-repeat stutter, grid from the sample start
+    void processRepeat (juce::AudioBuffer<float>& audio, int n, const FxSettings& s, double sr, double beat, bool loop)
+    {
+        const double grid = beat * 4.0 / (double) (1 << juce::jlimit (1, 5, s.repeatRate));
+        const double seg = juce::jmax (beat, 2.0 * grid);
+        const int perSegment = juce::roundToInt (seg / grid);
+        if (grid < 32.0 || n < 64)
+            return;
+
+        // slice boundaries in the output and where each slice reads from
+        struct Slice { int start, src; };
+        std::vector<Slice> slices;
+        for (long long k = 0;; ++k)
+        {
+            const double segStart = (double) k * seg;
+            if (segStart >= n)
+                break;
+            for (int m = 0; m < perSegment; ++m)
+            {
+                const auto start = (int) std::llround (segStart + m * grid);
+                if (start >= n)
+                    break;
+                slices.push_back ({ start, (int) std::llround (segStart) });
+            }
+        }
+
+        const int fade = juce::jmax (1, juce::jmin ((int) (sr * 0.0025), (int) (grid * 0.25)));
+        const juce::AudioBuffer<float> src (audio);
+        for (int ch = 0; ch < audio.getNumChannels(); ++ch)
+        {
+            const auto* in = src.getReadPointer (ch);
+            auto* out = audio.getWritePointer (ch);
+            const auto at = [&] (long long k) noexcept
+            {
+                if (loop)
+                    return in[(size_t) (((k % n) + n) % n)];
+                return k >= 0 && k < n ? in[(size_t) k] : 0.0f;
+            };
+
+            for (size_t j = 0; j < slices.size(); ++j)
+            {
+                const auto& cur = slices[j];
+                const int end = j + 1 < slices.size() ? slices[j + 1].start : n;
+                for (int i = cur.start; i < end; ++i)
+                    out[i] = at ((long long) cur.src + (i - cur.start));
+
+                // crossfade from where the previous slice was heading (in a loop the
+                // first slice continues the last one)
+                if (j == 0 && ! loop)
+                    continue;
+                const auto& prev = j > 0 ? slices[j - 1] : slices.back();
+                const long long prevStart = j > 0 ? prev.start : (long long) prev.start - n;
+                const long long prevSrc = (long long) prev.src + (cur.start - prevStart);
+                if (prevSrc == cur.src)
+                    continue;
+                for (int i = cur.start; i < juce::jmin (end, cur.start + fade); ++i)
+                {
+                    const float a = fadeIn (i - cur.start, fade);
+                    out[i] = out[i] * a + at (prevSrc + (i - cur.start)) * (1.0f - a);
+                }
+            }
         }
     }
 
@@ -484,15 +627,20 @@ namespace
 // ==============================================================================
 void process (juce::AudioBuffer<float>& audio, const FxSettings& s, double sampleRate, double bpm, bool loop)
 {
-    const int n = audio.getNumSamples();
     const int chans = audio.getNumChannels();
-    if (! s.anyOn() || n == 0 || chans == 0)
+    if (! s.anyOn() || audio.getNumSamples() == 0 || chans == 0)
         return;
 
     const double sr = sampleRate > 1000.0 ? sampleRate : 44100.0;
     const double beat = 60.0 / juce::jlimit (20.0, 400.0, bpm > 0.0 ? bpm : 120.0) * sr;
 
+    // ---- time first: everything after works on the new speed (and length)
+    if (s.timeMode != 0)
+        processTime (audio, s, sr, loop);
+    const int n = audio.getNumSamples();
+
     // ---- static and position-locked modules on the sample itself
+    if (s.repeatRate != 0) processRepeat (audio, n, s, sr, beat, loop);
     if (s.filterOn)   processFilter (audio, n, s, sr, loop);
     if (s.driveOn)    processDrive (audio, n, s, sr, loop);
     if (s.crushOn)    processCrush (audio, n, s);
@@ -567,34 +715,12 @@ void process (juce::AudioBuffer<float>& audio, const FxSettings& s, double sampl
 // ==============================================================================
 namespace
 {
-    juce::uint16 parsePattern (const char* p)
-    {
-        juce::uint16 bits = 0;
-        for (int i = 0; i < 16 && p[i] != 0; ++i)
-            if (p[i] == 'x')
-                bits = (juce::uint16) (bits | (1u << i));
-        return bits;
-    }
-
-    // stutter / chop patterns that groove (step 0 always on so the downbeat lands)
-    constexpr const char* gatePatterns[] {
-        "xx.xxx.xxx.xxx.x",   // triplet-feel chop
-        "x.x.x.x.x.x.xxxx",   // eighths, roll into the next bar
-        "xxx.xx.xxx.xxxxx",
-        "x..x..x.x..x..x.",   // 3-3-2 bounce
-        "xxxxxxxx.x.x.x.x",   // half straight, half stutter
-        "xx.xx.xx.xx.x.x.",
-        "x.xxx.xxx.xxx.x.",
-        "xxxx..xxxx..xx.x",
-        "x.x.xx.xx.x.xxxx",
-        "xxxxxxxxxxxx.x.x",   // end-of-bar stutter
-        "xxx.xxx.xxx.x.x.",
-        "x.xxx.x.x.xxx.xx"
-    };
-
     float range (juce::Random& r, float lo, float hi) { return lo + (hi - lo) * r.nextFloat(); }
     float logRange (juce::Random& r, float lo, float hi) { return lo * std::pow (hi / lo, r.nextFloat()); }
     template <typename T> T pick3 (int strength, T a, T b, T c) { return strength <= 0 ? a : (strength == 1 ? b : c); }
+
+    template <size_t N>
+    int pickFrom (juce::Random& r, const int (&values)[N]) { return values[r.nextInt ((int) N)]; }
 }
 
 FxSettings randomise (juce::Random& r, int strength)
@@ -602,12 +728,18 @@ FxSettings randomise (juce::Random& r, int strength)
     strength = juce::jlimit (0, 2, strength);
     FxSettings s;
 
-    enum { filter, drive, crush, gate, tape, delay, reverb, width, numModules };
-    static constexpr int weights[numModules] { 3, 3, 2, 3, 1, 3, 3, 2 };
+    // only the simple modules the rack shows, so whatever KILL turns on is visible
+    enum { time, repeat, filter, delay, reverb, numModules };
+    static constexpr int weights[numModules] { 3, 3, 3, 2, 2 };
 
-    const int count = strength == 0 ? 2 : (strength == 1 ? 2 + r.nextInt (2) : 3 + r.nextInt (2));
+    const int count = strength == 0 ? 1 + r.nextInt (2) : (strength == 1 ? 2 + r.nextInt (2) : 3 + r.nextInt (2));
     bool on[numModules] {};
-    for (int picked = 0; picked < count;)
+
+    // the toys lead: nearly always a time or repeat move
+    if (r.nextFloat() < 0.85f)
+        on[r.nextBool() ? time : repeat] = true;
+
+    for (int picked = (int) on[time] + (int) on[repeat]; picked < count;)
     {
         int total = 0;
         for (int m = 0; m < numModules; ++m)
@@ -618,68 +750,47 @@ FxSettings randomise (juce::Random& r, int strength)
             if (on[m]) continue;
             if ((x -= weights[m]) < 0) break;
         }
-        // keep it musical: tape stop is rare and never stacked with the gate on subtle
-        if (m == tape && strength == 0 && on[gate])
-            continue;
+        // keep it musical: halftime and stutter together only from normal up
+        if ((m == time && on[repeat]) || (m == repeat && on[time]))
+            if (strength == 0)
+                continue;
         on[m] = true;
         ++picked;
     }
 
+    if (on[time])
+    {
+        static constexpr int subtle[] { 1 }, normal[] { 1, 1, 1, 1, 1, 3, 3, 2 }, extreme[] { 1, 1, 2, 2, 3, 3 };
+        s.timeMode = pick3 (strength, pickFrom (r, subtle), pickFrom (r, normal), pickFrom (r, extreme));
+    }
+
+    if (on[repeat])
+    {
+        static constexpr int subtle[] { 2, 3, 3, 4 }, normal[] { 1, 2, 3, 3, 4, 4, 5 }, extreme[] { 3, 4, 4, 5, 5 };
+        s.repeatRate = pick3 (strength, pickFrom (r, subtle), pickFrom (r, normal), pickFrom (r, extreme));
+        // slow material: 1/32 over a halftime is mush, keep the stutter a notch coarser
+        if (s.timeMode == 2)
+            s.repeatRate = juce::jmin (s.repeatRate, 4);
+    }
+
     if ((s.filterOn = on[filter]))
     {
-        const float t = r.nextFloat();
-        s.filterType = t < 0.5f ? 0 : (t < 0.8f ? 1 : 2);
+        // low-pass or high-pass only (the rack's FILTER knob)
+        s.filterType = r.nextFloat() < 0.6f ? 0 : 1;
         if (s.filterType == 0)
-            s.filterFreq = pick3 (strength, logRange (r, 3000, 9000), logRange (r, 900, 4000), logRange (r, 300, 1400));
-        else if (s.filterType == 1)
-            s.filterFreq = pick3 (strength, logRange (r, 80, 250), logRange (r, 200, 700), logRange (r, 500, 1600));
+            s.filterFreq = pick3 (strength, logRange (r, 2500, 7000), logRange (r, 700, 2500), logRange (r, 250, 900));
         else
-            s.filterFreq = logRange (r, 600, 2500);
-        s.filterReso = pick3 (strength, range (r, 0.7f, 1.2f), range (r, 0.8f, 3.0f), range (r, 2.0f, 6.0f));
+            s.filterFreq = pick3 (strength, logRange (r, 120, 300), logRange (r, 250, 800), logRange (r, 600, 1800));
     }
-
-    if ((s.driveOn = on[drive]))
-    {
-        s.driveType = r.nextInt (3);
-        s.drive = pick3 (strength, range (r, 0.15f, 0.35f), range (r, 0.3f, 0.6f), range (r, 0.6f, 0.95f));
-        s.driveMix = pick3 (strength, range (r, 0.4f, 0.7f), range (r, 0.6f, 1.0f), range (r, 0.85f, 1.0f));
-    }
-
-    if ((s.crushOn = on[crush]))
-    {
-        s.crushBits = std::round (pick3 (strength, range (r, 10, 12), range (r, 6, 9), range (r, 3, 6)));
-        s.crushRate = pick3 (strength, range (r, 0.0f, 0.15f), range (r, 0.15f, 0.4f), range (r, 0.35f, 0.7f));
-    }
-
-    if ((s.gateOn = on[gate]))
-    {
-        s.gatePattern = parsePattern (gatePatterns[r.nextInt ((int) std::size (gatePatterns))]);
-        const float t = r.nextFloat();
-        s.gateRate = strength == 2 && t < 0.3f ? 3 : (t < 0.75f ? 2 : 1);
-        s.gateDepth = pick3 (strength, range (r, 0.4f, 0.6f), range (r, 0.7f, 1.0f), 1.0f);
-    }
-
-    if ((s.tapeStopOn = on[tape]))
-        s.tapeStopBeats = pick3 (strength, 0.5f, 1.0f + 0.5f * (float) r.nextInt (3), 2.0f + (float) r.nextInt (3));
 
     if ((s.delayOn = on[delay]))
     {
-        static constexpr int rates[] { 1, 2, 2, 3, 0, 4 };
-        s.delayRate = rates[r.nextInt ((int) std::size (rates))];
-        s.delayFeedback = pick3 (strength, range (r, 0.2f, 0.35f), range (r, 0.3f, 0.55f), range (r, 0.5f, 0.75f));
-        s.delayMix = pick3 (strength, range (r, 0.12f, 0.2f), range (r, 0.18f, 0.32f), range (r, 0.3f, 0.45f));
-        s.delayPingPong = r.nextFloat() < 0.7f;
+        s.delayRate = r.nextFloat() < 0.6f ? 1 : 0;   // 1/8 or 1/4
+        s.delayMix = pick3 (strength, range (r, 0.12f, 0.2f), range (r, 0.18f, 0.3f), range (r, 0.28f, 0.42f));
     }
 
     if ((s.reverbOn = on[reverb]))
-    {
-        s.reverbSize = pick3 (strength, range (r, 0.3f, 0.5f), range (r, 0.45f, 0.75f), range (r, 0.7f, 0.95f));
-        s.reverbDamp = range (r, 0.3f, 0.7f);
-        s.reverbMix = pick3 (strength, range (r, 0.1f, 0.18f), range (r, 0.15f, 0.3f), range (r, 0.3f, 0.5f));
-    }
-
-    if ((s.widthOn = on[width]))
-        s.width = pick3 (strength, range (r, 1.2f, 1.4f), range (r, 1.3f, 1.7f), range (r, 1.6f, 2.0f));
+        s.reverbMix = pick3 (strength, range (r, 0.1f, 0.18f), range (r, 0.15f, 0.28f), range (r, 0.25f, 0.4f));
 
     // delay + reverb together: pull both back so the dry still leads
     if (s.delayOn && s.reverbOn)

@@ -50,12 +50,12 @@ namespace
         return b;
     }
 
-    juce::AudioBuffer<float> makeSine (int n, float amp = 0.5f)
+    juce::AudioBuffer<float> makeSine (int n, float amp = 0.5f, double freq = 330.0)
     {
         juce::AudioBuffer<float> b (2, n);
         for (int i = 0; i < n; ++i)
         {
-            const auto v = amp * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 330.0 * i / sr);
+            const auto v = amp * (float) std::sin (2.0 * juce::MathConstants<double>::pi * freq * i / sr);
             b.setSample (0, i, v);
             b.setSample (1, i, v);
         }
@@ -87,6 +87,46 @@ namespace
         for (int i = start; i < start + num; ++i)
             e += (double) b.getSample (ch, i) * b.getSample (ch, i);
         return (float) std::sqrt (e / juce::jmax (1, num));
+    }
+
+    /** Zero crossings per sample of channel 0 over [start, start + num). */
+    double crossingRate (const juce::AudioBuffer<float>& b, int start, int num)
+    {
+        int c = 0;
+        for (int i = start + 1; i < start + num; ++i)
+            c += (b.getSample (0, i - 1) < 0.0f) != (b.getSample (0, i) < 0.0f) ? 1 : 0;
+        return (double) c / juce::jmax (1, num);
+    }
+
+    /** Normalised correlation of a[aStart..] and b[bStart..] over num samples (channel 0). */
+    double correlation (const juce::AudioBuffer<float>& a, int aStart, const juce::AudioBuffer<float>& b, int bStart, int num)
+    {
+        double ab = 0.0, aa = 0.0, bb = 0.0;
+        for (int i = 0; i < num; ++i)
+        {
+            const double x = a.getSample (0, aStart + i), y = b.getSample (0, bStart + i);
+            ab += x * y; aa += x * x; bb += y * y;
+        }
+        return aa > 0.0 && bb > 0.0 ? ab / std::sqrt (aa * bb) : 0.0;
+    }
+
+    /** Largest sample-to-sample step over the whole buffer and across the loop wrap. */
+    void steps (const juce::AudioBuffer<float>& b, float& maxStep, float& seam, double& meanStep)
+    {
+        const int n = b.getNumSamples();
+        maxStep = seam = 0.0f;
+        meanStep = 0.0;
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        {
+            const auto* d = b.getReadPointer (ch);
+            for (int i = 1; i < n; ++i)
+            {
+                maxStep = juce::jmax (maxStep, std::abs (d[i] - d[i - 1]));
+                meanStep += std::abs (d[i] - d[i - 1]);
+            }
+            seam = juce::jmax (seam, std::abs (d[0] - d[n - 1]));
+        }
+        meanStep /= (double) b.getNumChannels() * (n - 1);
     }
 
     void writeWav (const juce::AudioBuffer<float>& b, const juce::File& file)
@@ -126,7 +166,7 @@ namespace
 
     int countOn (const fx::FxSettings& s)
     {
-        return (int) s.filterOn + (int) s.driveOn + (int) s.crushOn + (int) s.gateOn
+        return (int) (s.timeMode != 0) + (int) (s.repeatRate != 0) + (int) s.filterOn + (int) s.driveOn + (int) s.crushOn + (int) s.gateOn
              + (int) s.tapeStopOn + (int) s.delayOn + (int) s.reverbOn + (int) s.widthOn;
     }
 
@@ -134,6 +174,7 @@ namespace
     void testSerialisation()
     {
         fx::FxSettings s;
+        s.timeMode = 2; s.repeatRate = 4;
         s.filterOn = true; s.filterType = 2; s.filterFreq = 812.5f; s.filterReso = 3.25f;
         s.driveOn = true; s.driveType = 1; s.drive = 0.77f; s.driveMix = 0.5f;
         s.crushOn = true; s.crushBits = 5.0f; s.crushRate = 0.61f;
@@ -144,7 +185,7 @@ namespace
         s.widthOn = true; s.width = 0.4f;
 
         const auto tree = s.toValueTree();
-        check (tree.hasType ("Fx") && tree.getNumProperties() == 28, "toValueTree: type Fx, every field a property (" + juce::String (tree.getNumProperties()) + ")");
+        check (tree.hasType ("Fx") && tree.getNumProperties() == 30, "toValueTree: type Fx, every field a property (" + juce::String (tree.getNumProperties()) + ")");
         const auto back = fx::FxSettings::fromValueTree (juce::ValueTree::fromXml (tree.toXmlString()));
         check (back == s && ! (back != s), "round trip through XML keeps every (non-default) value");
         check (! s.isDefault() && s.anyOn(), "isDefault / anyOn on a full rack");
@@ -156,8 +197,27 @@ namespace
         bad.setProperty ("delayFeedback", 3.0, nullptr);
         bad.setProperty ("filterType", 9, nullptr);
         bad.setProperty ("width", -5.0, nullptr);
+        bad.setProperty ("timeMode", 7, nullptr);
+        bad.setProperty ("repeatRate", -2, nullptr);
         const auto c = fx::FxSettings::fromValueTree (bad);
-        check (c.filterFreq <= 20000.0f && c.delayFeedback <= 0.95f && c.filterType == 2 && c.width >= 0.0f, "fromValueTree clamps out-of-range values");
+        check (c.filterFreq <= 20000.0f && c.delayFeedback <= 0.95f && c.filterType == 2 && c.width >= 0.0f
+                   && c.timeMode == 3 && c.repeatRate == 0, "fromValueTree clamps out-of-range values");
+
+        fx::FxSettings t;
+        t.timeMode = 1;
+        fx::FxSettings u;
+        u.repeatRate = 5;
+        const auto t2 = fx::FxSettings::fromValueTree (t.toValueTree());
+        const auto u2 = fx::FxSettings::fromValueTree (u.toValueTree());
+        check (t.anyOn() && ! t.isDefault() && t != fx::FxSettings {} && t2.timeMode == 1 && t2 == t,
+               "timeMode alone: anyOn, not default, == sees it, round trip");
+        check (u.anyOn() && ! u.isDefault() && u != t && u2.repeatRate == 5 && u2 == u,
+               "repeatRate alone: anyOn, not default, == sees it, round trip");
+
+        juce::ValueTree old ("Fx");   // a project saved before time / repeat existed
+        old.setProperty ("filterOn", true, nullptr);
+        const auto o = fx::FxSettings::fromValueTree (old);
+        check (o.filterOn && o.timeMode == 0 && o.repeatRate == 0, "older projects load with time and repeat off");
 
         fx::FxSettings d;
         d.filterFreq += 1.0f;
@@ -181,6 +241,11 @@ namespace
 
         struct Case { const char* name; std::function<void (fx::FxSettings&)> set; };
         const Case cases[] {
+            { "half",      [] (fx::FxSettings& s) { s.timeMode = 1; } },
+            { "quarter",   [] (fx::FxSettings& s) { s.timeMode = 2; } },
+            { "double",    [] (fx::FxSettings& s) { s.timeMode = 3; } },
+            { "repeat8",   [] (fx::FxSettings& s) { s.repeatRate = 3; } },
+            { "repeat32",  [] (fx::FxSettings& s) { s.repeatRate = 5; } },
             { "filter",    [] (fx::FxSettings& s) { s.filterOn = true; s.filterFreq = 600.0f; s.filterReso = 4.0f; } },
             { "filter_hp", [] (fx::FxSettings& s) { s.filterOn = true; s.filterType = 1; s.filterFreq = 900.0f; } },
             { "filter_bp", [] (fx::FxSettings& s) { s.filterOn = true; s.filterType = 2; s.filterFreq = 1500.0f; s.filterReso = 8.0f; } },
@@ -204,7 +269,8 @@ namespace
             {
                 auto out = in;
                 fx::process (out, s, sr, bpm, loop);
-                const bool lengthOk = loop ? out.getNumSamples() == in.getNumSamples() : out.getNumSamples() >= in.getNumSamples();
+                const bool lengthOk = loop || s.timeMode == 3 ? out.getNumSamples() == (loop ? in.getNumSamples() : (in.getNumSamples() + 1) / 2)
+                                                              : out.getNumSamples() >= in.getNumSamples();
                 check (lengthOk && maxDiff (in, out) > 1.0e-3f && finiteAndSafe (out),
                        juce::String (c.name) + (loop ? " (loop)" : " (one-shot)") + ": changes the signal, finite, peak <= 0.99, length "
                            + juce::String (out.getNumSamples()));
@@ -368,7 +434,8 @@ namespace
     void testRandomise (const juce::File& dir)
     {
         juce::Random random (1234);
-        bool countsOk = true, differ = true, valid = true;
+        bool countsOk = true, valid = true, visibleOnly = true;
+        int toys = 0, repeats = 0;
         fx::FxSettings previous;
         juce::String detail;
         for (int strength = 0; strength <= 2; ++strength)
@@ -376,19 +443,25 @@ namespace
             {
                 const auto s = fx::randomise (random, strength);
                 const int c = countOn (s);
-                if (c < 2 || c > 4)
+                if (c < 1 || c > 4)
                 {
                     countsOk = false;
                     detail << " " << c;
                 }
+                if (s.driveOn || s.crushOn || s.gateOn || s.tapeStopOn || s.widthOn || (s.filterOn && s.filterType == 2)
+                    || (s.delayOn && s.delayRate != 0 && s.delayRate != 1))
+                    visibleOnly = false;
+                toys += (s.timeMode != 0 || s.repeatRate != 0) ? 1 : 0;
                 if (s == previous)
-                    differ = false;
+                    ++repeats;
                 if (! (fx::FxSettings::fromValueTree (s.toValueTree()) == s))
                     valid = false;
                 previous = s;
             }
-        check (countsOk, "randomise: 2-4 modules on for every strength" + detail);
-        check (differ, "randomise: differs per call");
+        check (countsOk, "randomise: 1-4 modules on for every strength" + detail);
+        check (visibleOnly, "randomise (KILL) only uses the modules the rack shows (time, repeat, LP/HP filter, 1/8 or 1/4 delay, reverb)");
+        check (toys >= 130, "randomise favours time / repeat (" + juce::String (toys) + " of 180 racks)");
+        check (repeats <= 9, "randomise: (almost) always differs from the previous call (" + juce::String (repeats) + " repeats in 180)");
         check (valid, "randomise: values inside the legal ranges");
 
         juce::Random r2 (99);
@@ -410,6 +483,7 @@ namespace
     {
         auto in = makeLoop (64);   // 16 bars at 140 bpm
         fx::FxSettings s;
+        s.timeMode = 1; s.repeatRate = 4;
         s.filterOn = s.driveOn = s.crushOn = s.gateOn = s.tapeStopOn = s.delayOn = s.reverbOn = s.widthOn = true;
         s.crushBits = 10.0f; s.crushRate = 0.1f; s.reverbSize = 0.9f;
 
@@ -425,7 +499,172 @@ namespace
 #endif
     }
 
+    void testTime (const juce::File& dir)
+    {
+        // a 4-beat loop: 440 Hz in the first quarter, 880 Hz after
+        const int n = (int) std::round (beat * 4) & ~3;
+        juce::AudioBuffer<float> in (2, n);
+        double phase = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const float v = 0.5f * (float) std::sin (phase);
+            phase += 2.0 * juce::MathConstants<double>::pi * (i < n / 4 ? 440.0 : 880.0) / sr;
+            in.setSample (0, i, v);
+            in.setSample (1, i, v);
+        }
+
+        fx::FxSettings half;
+        half.timeMode = 1;
+        auto out = in;
+        fx::process (out, half, sr, bpm, true);
+        writeWav (out, dir.getChildFile ("fx_time_half_sine.wav"));
+        check (out.getNumSamples() == n, "HALF on a loop keeps the length");
+
+        const int edge = (int) (sr * 0.01);
+        const double zIn = crossingRate (in, 0, n / 4), zOut = crossingRate (out, edge, n / 2 - edge);
+        check (std::abs (zOut / zIn - 0.5) < 0.03, "HALF: first half of the output = first quarter of the input slowed (crossing rate x"
+                                                       + juce::String (zOut / zIn, 3) + ")");
+        float exact = 0.0f;
+        for (int k = edge; k < n / 4; ++k)
+            exact = juce::jmax (exact, std::abs (out.getSample (0, 2 * k) - in.getSample (0, k)));
+        check (exact < 1.0e-4f, "HALF reads the input at half speed (out[2k] == in[k], max diff " + juce::String (exact, 6) + ")");
+
+        // seam on a real loop
+        const auto loop = makeLoop (8);
+        for (int mode : { 1, 2, 3 })
+        {
+            fx::FxSettings s;
+            s.timeMode = mode;
+            auto o = loop;
+            fx::process (o, s, sr, bpm, true);
+            float maxStep, seam;
+            double meanStep;
+            steps (o, maxStep, seam, meanStep);
+            const juce::String name = mode == 1 ? "HALF" : (mode == 2 ? "QUARTER" : "DOUBLE");
+            check (o.getNumSamples() == loop.getNumSamples() && finiteAndSafe (o)
+                       && seam <= juce::jmax (0.02f, (float) meanStep * 6.0f) && seam <= maxStep,
+                   name + " loop: same length, seamless wrap (jump " + juce::String (seam, 5) + ", mean step " + juce::String (meanStep, 5) + ")");
+            writeWav (o, dir.getChildFile ("fx_time_" + name.toLowerCase() + "_loop.wav"));
+
+            if (mode == 3)
+            {
+                const int h = o.getNumSamples() / 2;
+                const double twice = correlation (o, 0, o, h, h);
+                // the loop at double speed: out[i] ~ in[2i] (anti-alias filtered)
+                juce::AudioBuffer<float> dec (2, h);
+                for (int i = 0; i < h; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        dec.setSample (ch, i, loop.getSample (ch, 2 * i));
+                const double same = correlation (o, 0, dec, 0, h);
+                check (twice > 0.99 && same > 0.9, "DOUBLE loop contains the loop twice (halves corr " + juce::String (twice, 4)
+                                                       + ", vs in[2i] " + juce::String (same, 3) + ")");
+            }
+        }
+
+        // DOUBLE is anti-aliased: a 15 kHz tone (-> 30 kHz) must not fold back down
+        auto high = makeSine ((int) (sr * 0.5), 0.5f, 15000.0);
+        fx::FxSettings dbl;
+        dbl.timeMode = 3;
+        fx::process (high, dbl, sr, bpm, true);
+        const float alias = rms (high, 0, (int) (sr * 0.05), high.getNumSamples() - (int) (sr * 0.1)) / (0.5f / std::sqrt (2.0f));
+        check (alias < 0.03f, "DOUBLE anti-aliasing: a 15 kHz tone leaves " + juce::String (juce::Decibels::gainToDecibels (alias), 1) + " dB");
+
+        // one-shots change length (and pitch)
+        const auto hit = makeSine ((int) (sr * 0.3));
+        for (int mode : { 1, 2, 3 })
+        {
+            fx::FxSettings s;
+            s.timeMode = mode;
+            auto o = hit;
+            fx::process (o, s, sr, bpm, false);
+            const int len = hit.getNumSamples();
+            const int expected = mode == 1 ? len * 2 : (mode == 2 ? len * 4 : (len + 1) / 2);
+            const double z = crossingRate (o, 0, o.getNumSamples() - 8) / crossingRate (hit, 0, len - 8);
+            const double zWant = mode == 1 ? 0.5 : (mode == 2 ? 0.25 : 2.0);
+            check (o.getNumSamples() == expected && std::abs (z / zWant - 1.0) < 0.03 && finiteAndSafe (o),
+                   "one-shot " + juce::String (mode == 1 ? "HALF" : (mode == 2 ? "QUARTER" : "DOUBLE")) + ": length "
+                       + juce::String (len) + " -> " + juce::String (o.getNumSamples()) + ", pitch x" + juce::String (z, 3));
+            if (mode == 1)
+                writeWav (o, dir.getChildFile ("fx_time_half_oneshot.wav"));
+        }
+    }
+
+    void testRepeat (const juce::File& dir)
+    {
+        const auto in = makeLoop (8);
+        const int n = in.getNumSamples();
+        fx::FxSettings s;
+        s.repeatRate = 4;   // 1/16
+        auto out = in;
+        fx::process (out, s, sr, bpm, true);
+        writeWav (out, dir.getChildFile ("fx_repeat16.wav"));
+        check (out.getNumSamples() == n && finiteAndSafe (out), "REPEAT keeps the length");
+
+        const double grid = beat / 4.0;
+        const int skip = (int) (sr * 0.004);
+        const int len = (int) grid - skip - 4;
+        double worst = 1.0, firstSlice = 1.0;
+        for (int k = 0; k < 8; ++k)
+        {
+            const auto segStart = (int) std::llround (k * beat);
+            for (int m = 1; m < 4; ++m)
+            {
+                const auto start = (int) std::llround (k * beat + m * grid);
+                worst = juce::jmin (worst, correlation (out, start + skip, in, segStart + skip, len));
+            }
+            firstSlice = juce::jmin (firstSlice, correlation (out, segStart + skip, in, segStart + skip, len));
+        }
+        check (worst > 0.999 && firstSlice > 0.999, "REPEAT 1/16 at 140 bpm: every 16th of a beat = the beat's first 16th (min corr "
+                                                        + juce::String (worst, 5) + ")");
+
+        // a later 16th is not the input there (it really repeats)
+        const int third = (int) std::llround (2 * grid);
+        check (correlation (out, third + skip, in, third + skip, len) < 0.9, "REPEAT replaces the rest of the beat");
+
+        // click-free on a sine and across the loop wrap
+        auto sine = makeSine ((int) std::round (beat * 4));
+        fx::process (sine, s, sr, bpm, true);
+        float maxStep, seam;
+        double meanStep;
+        steps (sine, maxStep, seam, meanStep);
+        const float sineStep = 0.5f * 2.0f * juce::MathConstants<float>::pi * 330.0f / (float) sr;
+        check (maxStep < sineStep * 1.6f && seam < sineStep * 1.6f, "REPEAT slice edges are click-free (max step " + juce::String (maxStep, 4)
+                                                                         + ", wrap " + juce::String (seam, 4) + ", sine step " + juce::String (sineStep, 4) + ")");
+        writeWav (sine, dir.getChildFile ("fx_repeat16_sine.wav"));
+
+        // every grid keeps the length and renders safely, loop and one-shot
+        bool ok = true;
+        for (int rate = 1; rate <= 5; ++rate)
+            for (bool loop : { true, false })
+            {
+                fx::FxSettings r;
+                r.repeatRate = rate;
+                auto o = in;
+                fx::process (o, r, sr, bpm, loop);
+                ok = ok && o.getNumSamples() == n && finiteAndSafe (o) && maxDiff (o, in) > 1.0e-3f;
+            }
+        check (ok, "REPEAT 1/2 .. 1/32: same length, safe, changes the signal (loop and one-shot)");
+
+        // time then repeat: HALF + 1/8 keeps the loop's length and stays seamless
+        fx::FxSettings both;
+        both.timeMode = 1; both.repeatRate = 3;
+        auto o = in;
+        fx::process (o, both, sr, bpm, true);
+        steps (o, maxStep, seam, meanStep);
+        check (o.getNumSamples() == n && seam <= juce::jmax (0.02f, (float) meanStep * 6.0f), "HALF + REPEAT 1/8: same length, seamless");
+        writeWav (o, dir.getChildFile ("fx_half_repeat8.wav"));
+    }
+
     // ==========================================================================
+    template <typename T>
+    T* findChild (juce::Component& parent, std::function<bool (T&)> match)
+    {
+        for (auto* c : parent.getChildren())
+            if (auto* t = dynamic_cast<T*> (c); t != nullptr && match (*t))
+                return t;
+        return nullptr;
+    }
+
     void testUi (const juce::File& dir)
     {
         FxRack rack;
@@ -434,66 +673,134 @@ namespace
         rack.onChange = [&] (const fx::FxSettings& s) { ++calls; last = s; };
 
         fx::FxSettings s;
-        s.filterOn = true; s.filterFreq = 1800.0f; s.filterReso = 2.2f;
-        s.driveOn = true; s.driveType = 1; s.drive = 0.55f; s.driveMix = 0.8f;
-        s.gateOn = true; s.gatePattern = pattern ("xx.xxx.xxx.xxx.x");
-        s.delayOn = true; s.delayRate = 2; s.delayFeedback = 0.45f; s.delayMix = 0.28f;
-        s.reverbOn = true; s.reverbMix = 0.22f;
+        s.timeMode = 1;
+        s.repeatRate = 4;
+        s.filterOn = true; s.filterType = 0; s.filterFreq = 800.0f;
+        s.delayOn = true; s.delayRate = 1; s.delayMix = 0.28f;
         rack.setSettings (s);
         rack.setEnabled (true);
         check (calls == 0 && rack.getSettings() == s, "setSettings does not call onChange");
 
-        rack.setSize (1100, 230);
+        rack.setSize (1100, 190);
         savePng (rack, dir.getChildFile ("fx_rack.png"));
         savePng (rack, dir.getChildFile ("fx_rack@2x.png"), 2.0f);
-        rack.setSize (900, 220);
-        savePng (rack, dir.getChildFile ("fx_rack_900.png"));
-        rack.setSize (1100, 230);
+        savePng (rack, dir.getChildFile ("fx_rack_scaled08.png"), 0.8f);
+        rack.setSize (900, 170);
+        savePng (rack, dir.getChildFile ("fx_rack_small.png"));
+        savePng (rack, dir.getChildFile ("fx_rack_small_scaled08.png"), 0.8f);
+        rack.setSettings ({});
+        savePng (rack, dir.getChildFile ("fx_rack_off.png"));
+        rack.setSize (1100, 190);
 
-        // a knob drag reports once, at mouse up
-        juce::Component* knob = nullptr;
-        for (auto* c : rack.getChildren())
-            if (c->getMouseCursor() == juce::MouseCursor (juce::MouseCursor::UpDownResizeCursor))
-            {
-                knob = c;   // first knob: filter FREQ
-                break;
-            }
+        // the first knob is the bipolar FILTER: drag up -> high-pass, reported once at mouse up
+        auto* knob = findChild<juce::Component> (rack, [] (juce::Component& c)
+        {
+            return c.getMouseCursor() == juce::MouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        });
         if (knob != nullptr)
         {
             const auto centre = knob->getLocalBounds().getCentre().toFloat();
             knob->mouseDown (mouse (*knob, centre, centre, false));
-            for (int dy = 1; dy <= 40; dy += 3)
+            for (int dy = 1; dy <= 100; dy += 3)
                 knob->mouseDrag (mouse (*knob, centre.translated (0.0f, (float) -dy), centre, true));
             const int during = calls;
-            knob->mouseUp (mouse (*knob, centre.translated (0.0f, -40.0f), centre, true));
-            check (during == 0 && calls == 1 && last.filterFreq > s.filterFreq, "knob drag: onChange only at mouse up (freq " + juce::String (last.filterFreq, 0) + " Hz)");
+            knob->mouseUp (mouse (*knob, centre.translated (0.0f, -100.0f), centre, true));
+            check (during == 0 && calls == 1 && last.filterOn && last.filterType == 1 && last.filterFreq > 30.0f,
+                   "FILTER knob right: high-pass at " + juce::String (last.filterFreq, 0) + " Hz, onChange only at mouse up");
+
+            knob->mouseDown (mouse (*knob, centre, centre, false));
+            for (int dy = 1; dy <= 300; dy += 5)
+                knob->mouseDrag (mouse (*knob, centre.translated (0.0f, (float) dy), centre, true));
+            knob->mouseUp (mouse (*knob, centre.translated (0.0f, 300.0f), centre, true));
+            check (calls == 2 && last.filterOn && last.filterType == 0 && last.filterFreq < 1000.0f,
+                   "FILTER knob left: low-pass at " + juce::String (last.filterFreq, 0) + " Hz");
+
             knob->mouseDoubleClick (mouse (*knob, centre, centre, false));
-            check (calls == 2 && juce::approximatelyEqual (last.filterFreq, fx::FxSettings {}.filterFreq), "knob double-click resets to default");
+            check (calls == 3 && ! last.filterOn && last.isDefault(), "FILTER double-click: centre = off, settings back to default");
         }
         else
         {
-            check (false, "found a knob");
+            check (false, "found the filter knob");
+        }
+
+        // the second knob is DELAY MIX: up from 0 turns the delay on at a rate the strip shows
+        juce::Component* delayKnob = nullptr;
+        int knobs = 0;
+        for (auto* c : rack.getChildren())
+            if (c->getMouseCursor() == juce::MouseCursor (juce::MouseCursor::UpDownResizeCursor) && ++knobs == 2)
+                delayKnob = c;
+        if (delayKnob != nullptr)
+        {
+            const auto centre = delayKnob->getLocalBounds().getCentre().toFloat();
+            delayKnob->mouseDown (mouse (*delayKnob, centre, centre, false));
+            for (int dy = 1; dy <= 60; dy += 3)
+                delayKnob->mouseDrag (mouse (*delayKnob, centre.translated (0.0f, (float) -dy), centre, true));
+            delayKnob->mouseUp (mouse (*delayKnob, centre.translated (0.0f, -60.0f), centre, true));
+            check (calls == 4 && last.delayOn && last.delayMix > 0.1f && last.delayRate == 1,
+                   "DELAY mix up from 0: delay on, mix " + juce::String (last.delayMix, 2) + ", rate 1/8");
+            delayKnob->mouseDoubleClick (mouse (*delayKnob, centre, centre, false));
+            check (calls == 5 && ! last.delayOn && last.isDefault(), "DELAY mix double-click: off, settings back to default");
+        }
+        else
+        {
+            check (false, "found the delay knob");
+        }
+
+        // HALFTIME pills (the first pill row): click the second segment, half speed
+        auto* pills = findChild<juce::Component> (rack, [] (juce::Component& c)
+        {
+            return c.getMouseCursor() == juce::MouseCursor (juce::MouseCursor::PointingHandCursor) && dynamic_cast<juce::Button*> (&c) == nullptr;
+        });
+        if (pills != nullptr)
+        {
+            const auto b = pills->getLocalBounds().toFloat();
+            const auto at = juce::Point<float> (b.getWidth() * 0.375f, b.getCentreY());
+            pills->mouseDown (mouse (*pills, at, at, false));
+            check (calls == 6 && last.timeMode == 1, "HALFTIME pill sets timeMode (" + juce::String (last.timeMode) + ")");
+        }
+        else
+        {
+            check (false, "found the halftime pills");
         }
 
         // KILL and RESET
-        for (auto* c : rack.getChildren())
-            if (auto* b = dynamic_cast<juce::Button*> (c); b != nullptr && b->getName() == "KILL")
+        if (auto* kill = findChild<juce::Button> (rack, [] (juce::Button& b) { return b.getName() == "KILL"; }))
+        {
+            bool visibleOnly = true;
+            for (int i = 0; i < 40; ++i)
             {
                 const int before = calls;
-                b->onClick();
-                const int on = countOn (rack.getSettings());
-                check (calls == before + 1 && on >= 2 && on <= 4 && last == rack.getSettings(), "KILL applies a random rack and reports it (" + juce::String (on) + " modules)");
-                savePng (rack, dir.getChildFile ("fx_rack_kill.png"));
+                const auto previous = rack.getSettings();
+                kill->onClick();
+                const auto& k = rack.getSettings();
+                visibleOnly = visibleOnly && calls == before + 1 && last == k && k != previous && countOn (k) >= 1
+                           && ! (k.driveOn || k.crushOn || k.gateOn || k.tapeStopOn || k.widthOn);
             }
-        for (auto* c : rack.getChildren())
-            if (auto* b = dynamic_cast<juce::Button*> (c); b != nullptr && b->getName() == "Reset FX")
-            {
-                b->onClick();
-                check (rack.getSettings().isDefault() && last.isDefault(), "RESET FX restores the defaults");
-            }
+            check (visibleOnly, "KILL applies and reports a new random rack of visible modules only (40 presses)");
+            savePng (rack, dir.getChildFile ("fx_rack_kill.png"));
+        }
+        else
+        {
+            check (false, "found KILL");
+        }
+        if (auto* reset = findChild<juce::Button> (rack, [] (juce::Button& b) { return b.getName() == "Reset"; }))
+        {
+            reset->onClick();
+            check (rack.getSettings().isDefault() && last.isDefault(), "RESET restores the defaults");
+        }
+        else
+        {
+            check (false, "found RESET");
+        }
+
+        // an older project with modules the strip does not show: RESET is flagged
+        fx::FxSettings legacy = s;
+        legacy.gateOn = true;
+        rack.setSettings (legacy);
+        savePng (rack, dir.getChildFile ("fx_rack_legacy.png"));
 
         rack.setSettings (s);
-        rack.setEnabled (false, "Select a sample to add effects");
+        rack.setEnabled (false, "Pick a loop or one-shot");
         savePng (rack, dir.getChildFile ("fx_rack_disabled.png"));
     }
 }
@@ -509,6 +816,8 @@ int runFxTest (int argc, char** argv)
     testPassthrough();
     testModules (dir);
     testLoopSeam (dir);
+    testTime (dir);
+    testRepeat (dir);
     testGate (dir);
     testTapeStop (dir);
     testRandomise (dir);

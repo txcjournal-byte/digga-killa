@@ -6,9 +6,11 @@
 namespace digga
 {
 
-/** The effect rack card of the editor: one module per effect (on/off +
-    its knobs), the gate step sequencer and the KILL button (random rack).
-    Reports a new FxSettings when a gesture ends. */
+/** The effect strip of the editor: a few fun, simple modules, left to right
+    HALFTIME (speed pills), REPEAT (stutter grid pills), FILTER (one bipolar
+    knob: low-pass left, high-pass right), DELAY (mix + rate) and REVERB (mix),
+    plus KILL (random rack) and RESET. Reports a new FxSettings when a
+    gesture ends. */
 class FxRack : public juce::Component
 {
 public:
