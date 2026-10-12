@@ -1,0 +1,21 @@
+TrapWin Sampler 1.0.0 - macOS installation (Apple Silicon & Intel, macOS 11+)
+============================================================================
+
+1. Unzip the download (double-click it).
+2. In Finder press Shift+Cmd+G and go to:  /Library/Audio/Plug-Ins/
+   - copy "TrapWin Sampler.vst3"      into  /Library/Audio/Plug-Ins/VST3/
+   - copy "TrapWin Sampler.component" into  /Library/Audio/Plug-Ins/Components/   (AU - Logic Pro, GarageBand)
+   (You can also use ~/Library/Audio/Plug-Ins/... for your user only.)
+3. Optional: copy "TrapWin Sampler.app" (standalone) into /Applications.
+4. Open your DAW and rescan plugins.
+   Logic Pro: AU Instruments > TrapWin > TrapWin Sampler.
+
+How it works
+------------
+Drop a song or loop (WAV, MP3, AIFF, FLAC) on the vinyl. TrapWin Sampler finds
+where its sections start (kick comes in, melody starts, drop, break) and cuts
+them into 8 and 16 bar loops, plus clean one-shots (kick, 808, snare, hats,
+chords, notes). Click a sample to edit it below, then drag it straight into
+your DAW as WAV or MIDI.
+
+Support: https://trapwin.com

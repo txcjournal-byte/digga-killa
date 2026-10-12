@@ -6,7 +6,7 @@ namespace digga
 
 namespace
 {
-    const juce::Identifier stateType { "TrapWinSampleState" };
+    const juce::Identifier stateType { "TrapWinSamplerState" };
     const juce::Identifier samplePathProperty { "samplePath" };
 }
 

@@ -1,0 +1,23 @@
+TrapWin Sampler 1.0.0 - Windows installation (Windows 10/11, 64-bit)
+====================================================================
+
+1. Close your DAW.
+2. Run "TrapWinSampler-1.0.0-Windows-Setup.exe" and follow the steps.
+   The VST3 plugin goes to    C:\Program Files\Common Files\VST3\TrapWin Sampler.vst3
+   The standalone app goes to C:\Program Files\TrapWin\TrapWin Sampler
+3. Start the DAW and rescan plugins
+   (FL Studio: Options > Manage plugins > Find installed plugins).
+4. Load "TrapWin Sampler" as an instrument / generator.
+
+How it works
+------------
+Drop a song or loop (WAV, MP3, AIFF, FLAC) on the vinyl. TrapWin Sampler finds
+where its sections start (kick comes in, melody starts, drop, break) and cuts
+them into 8 and 16 bar loops, plus clean one-shots (kick, 808, snare, hats,
+chords, notes). Click a sample to edit it below, then drag it straight into
+your DAW as WAV or MIDI.
+
+If Windows SmartScreen says "Windows protected your PC" for the installer,
+click "More info" > "Run anyway".
+
+Support: https://trapwin.com

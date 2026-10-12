@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(TrapWinSample VERSION 1.0.0 LANGUAGES C CXX)
+project(TrapWinSampler VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,12 +27,12 @@ endif()
 # ------------------------------------------------------------------------------
 # Plugin
 # ------------------------------------------------------------------------------
-juce_add_plugin(TrapWinSample
-    PRODUCT_NAME                "TrapWin Sample"
+juce_add_plugin(TrapWinSampler
+    PRODUCT_NAME                "TrapWin Sampler"
     COMPANY_NAME                "TrapWin"
     COMPANY_WEBSITE             "https://trapwin.com"
     COMPANY_EMAIL               "txcjournal@gmail.com"
-    BUNDLE_ID                   com.trapwin.sample
+    BUNDLE_ID                   com.trapwin.sampler
     PLUGIN_MANUFACTURER_CODE    Trwn
     PLUGIN_CODE                 Twsp
     IS_SYNTH                    TRUE
@@ -57,7 +57,7 @@ juce_add_binary_data(TrapWinAssets
         assets/models/basic_pitch.bin
         assets/brand/trapwin_logo.png)
 
-target_sources(TrapWinSample PRIVATE
+target_sources(TrapWinSampler PRIVATE
     source/PluginProcessor.cpp
     source/PluginEditor.cpp
     source/core/AudioTools.cpp
@@ -86,12 +86,12 @@ target_sources(TrapWinSample PRIVATE
     source/ui/MainView.cpp)
 
 # signalsmith-stretch 1.4.0 + signalsmith-linear 0.6.4 (MIT), vendored header-only
-target_include_directories(TrapWinSample PRIVATE source)
-target_include_directories(TrapWinSample SYSTEM PRIVATE
+target_include_directories(TrapWinSampler PRIVATE source)
+target_include_directories(TrapWinSampler SYSTEM PRIVATE
     third_party/signalsmith-stretch/include
     third_party/signalsmith-linear/include)
 
-target_compile_definitions(TrapWinSample PUBLIC
+target_compile_definitions(TrapWinSampler PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -100,7 +100,7 @@ target_compile_definitions(TrapWinSample PUBLIC
     JUCE_USE_OGGVORBIS=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
-target_link_libraries(TrapWinSample
+target_link_libraries(TrapWinSampler
     PRIVATE
         TrapWinAssets
         juce::juce_audio_utils
@@ -120,8 +120,8 @@ if(TRAPWIN_BUILD_TOOLS)
     target_sources(TrapWinTest PRIVATE tools/Snapshot.cpp)
     # reuse the plugin's compiled JUCE modules instead of building them twice
     target_include_directories(TrapWinTest PRIVATE source
-        $<TARGET_PROPERTY:TrapWinSample,INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:TrapWinSampler,INCLUDE_DIRECTORIES>)
     target_compile_definitions(TrapWinTest PRIVATE
-        $<TARGET_PROPERTY:TrapWinSample,COMPILE_DEFINITIONS>)
-    target_link_libraries(TrapWinTest PRIVATE TrapWinSample)
+        $<TARGET_PROPERTY:TrapWinSampler,COMPILE_DEFINITIONS>)
+    target_link_libraries(TrapWinTest PRIVATE TrapWinSampler)
 endif()

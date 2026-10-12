@@ -1,0 +1,51 @@
+TRAPWIN SAMPLER - END USER LICENSE AGREEMENT (EULA)
+
+Publisher: TrapWin ("we", "us")  -  https://trapwin.com
+Product:   TrapWin Sampler audio plug-in, its graphics and documentation ("Software")
+
+By installing or using the Software you agree to this Agreement. If you do not agree, do not
+install or use the Software.
+
+1. LICENSE
+   We grant you a non-exclusive, non-transferable license to install and use one purchased copy
+   of the Software on up to 3 computers that you personally own or control.
+   The Software is licensed, not sold. All rights not expressly granted remain with us.
+
+2. YOUR MUSIC
+   Loops, one-shots, MIDI and audio you create with the Software are yours as far as our rights
+   go. You are responsible for having the rights to the songs and recordings you load into it.
+
+3. RESTRICTIONS
+   You may not: (a) copy, share, resell, rent, lease or sublicense the Software;
+   (b) reverse engineer, decompile or disassemble the Software, except where the law allows it;
+   (c) redistribute the graphics or other content of the Software as a product of their own.
+
+4. TRANSFER
+   The license may not be transferred.
+
+5. UPDATES
+   Updates within version 1.x are free. We may, but are not obliged to, provide updates or support.
+
+6. THIRD-PARTY COMPONENTS
+   The Software is built with the JUCE framework and the VST3 SDK. VST is a registered trademark
+   of Steinberg Media Technologies GmbH. Other third-party notices are in THIRD-PARTY-LICENSES.txt.
+
+7. NO WARRANTY
+   The Software is provided "as is", without warranty of any kind, to the maximum extent permitted
+   by law. You are responsible for backing up your projects and data.
+
+8. LIMITATION OF LIABILITY
+   To the maximum extent permitted by law, we are not liable for any indirect, incidental or
+   consequential damages, loss of data, loss of profits or damage to equipment (including
+   speakers or hearing) arising from the use of the Software. Our total liability is limited to the
+   price you paid for the Software. Nothing in this Agreement limits rights you have as a consumer
+   under mandatory law.
+
+9. TERMINATION
+   This license ends automatically if you break this Agreement. You must then delete all copies.
+
+10. GOVERNING LAW
+   This Agreement is governed by the laws of the Czech Republic, without regard to its
+   conflict-of-law rules.
+
+Contact: https://trapwin.com

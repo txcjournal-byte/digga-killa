@@ -1,0 +1,5 @@
+
+NOTE: this macOS build is not notarized yet. If macOS says the plugin "can't be
+checked for malicious software": right-click the app > Open, or allow it in
+System Settings > Privacy & Security, or run in Terminal:
+  sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/TrapWin Sampler.vst3" "/Library/Audio/Plug-Ins/Components/TrapWin Sampler.component"

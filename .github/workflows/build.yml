@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  VERSION: 1.0.0
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -17,29 +20,31 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Package
+      - name: Collect
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item -Recurse "build/TrapWinSample_artefacts/Release/VST3/TrapWin Sample.vst3" out/
-          Copy-Item "build/TrapWinSample_artefacts/Release/Standalone/TrapWin Sample.exe" out/
+          Copy-Item -Recurse "build/TrapWinSampler_artefacts/Release/VST3/TrapWin Sampler.vst3" out/
+          Copy-Item "build/TrapWinSampler_artefacts/Release/Standalone/TrapWin Sampler.exe" out/
+
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $src = (Resolve-Path out).Path
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$src" installer\TrapWinSampler.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v5
         with:
-          name: TrapWinSample-Windows
-          path: out/
+          name: TrapWinSampler-Windows
+          path: |
+            out/
+            installer-out/*.exe
 
   macos:
     runs-on: macos-14
-    env:
-      # Optional: with these repository secrets the build is signed with a
-      # Developer ID and notarized by Apple (see README "Mac signing").
-      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -52,40 +57,85 @@ jobs:
       - name: Collect bundles
         run: |
           mkdir -p out
-          cp -R "build/TrapWinSample_artefacts/Release/VST3/TrapWin Sample.vst3" out/
-          cp -R "build/TrapWinSample_artefacts/Release/AU/TrapWin Sample.component" out/
-          cp -R "build/TrapWinSample_artefacts/Release/Standalone/TrapWin Sample.app" out/
+          cp -R "build/TrapWinSampler_artefacts/Release/VST3/TrapWin Sampler.vst3" out/
+          cp -R "build/TrapWinSampler_artefacts/Release/AU/TrapWin Sampler.component" out/
+          cp -R "build/TrapWinSampler_artefacts/Release/Standalone/TrapWin Sampler.app" out/
 
-      - name: Sign with Developer ID
-        if: env.MACOS_CERTIFICATE_P12 != ''
+      # Same repository secrets as the other TrapWin plugins (e.g. TrapWin Effector):
+      #   MACOS_CERT_P12 (base64 "Developer ID Application" .p12), MACOS_CERT_PASSWORD,
+      #   MACOS_SIGN_IDENTITY (optional, taken from the .p12 when empty),
+      #   notarization: APPLE_API_KEY_P8 + APPLE_API_KEY_ID + APPLE_API_ISSUER_ID (App Store Connect key)
+      #                 or APPLE_ID + APPLE_TEAM_ID + APPLE_APP_PASSWORD.
+      - name: Sign & notarize (Developer ID)
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
-          KEYCHAIN=build.keychain
-          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > cert.p12
-          security create-keychain -p ci "$KEYCHAIN"
-          security default-keychain -s "$KEYCHAIN"
-          security unlock-keychain -p ci "$KEYCHAIN"
-          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN"
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "::warning title=macOS::NOT signed - MACOS_CERT_P12 secret missing (unsigned build)"
+            echo "no" > signed.txt; exit 0
+          fi
+          KC=build.keychain
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p ci "$KC"
+          security default-keychain -s "$KC"
+          security unlock-keychain -p ci "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security import cert.p12 -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
           rm cert.p12
-          for bundle in out/*; do
-            codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$bundle"
-            codesign --verify --deep --strict --verbose=2 "$bundle"
+          curl -fsSL -o DeveloperIDG2CA.cer https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            && security import DeveloperIDG2CA.cer -k "$KC" || true
+          security list-keychains -d user -s "$KC" login.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KC" > /dev/null
+          if [ -z "$MACOS_SIGN_IDENTITY" ]; then
+            MACOS_SIGN_IDENTITY=$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)
+          fi
+          [ -n "$MACOS_SIGN_IDENTITY" ] || { echo "::error::No Developer ID Application identity in the .p12"; exit 1; }
+          for b in out/*; do
+            codesign --force --deep --options runtime --timestamp -s "$MACOS_SIGN_IDENTITY" "$b"
+            codesign --verify --deep --strict --verbose=2 "$b"
           done
-
-      - name: Notarize
-        if: env.MACOS_CERTIFICATE_P12 != '' && env.APPLE_ID != ''
-        run: |
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            P8="$APPLE_API_KEY_P8"
+            if ! printf '%s' "$P8" | grep -q -- '-----BEGIN'; then
+              DEC=$(printf '%s' "$P8" | tr -d ' \r\n\t' | base64 --decode 2>/dev/null || true)
+              if printf '%s' "$DEC" | grep -q -- '-----BEGIN'; then P8="$DEC"; fi
+            fi
+            B64=$(printf '%s' "$P8" | tr -d '\r' | sed -e 's/-----[A-Z ]*-----//g' | tr -d ' \n\t')
+            { echo "-----BEGIN PRIVATE KEY-----"; echo "$B64" | fold -w 64; echo "-----END PRIVATE KEY-----"; } > AuthKey.p8
+            openssl pkey -in AuthKey.p8 -noout || { echo "::error::APPLE_API_KEY_P8 is not a valid private key"; exit 1; }
+            NOTARY=(--key AuthKey.p8 --key-id "$(printf '%s' "$APPLE_API_KEY_ID" | tr -d ' \r\n')" --issuer "$(printf '%s' "$APPLE_API_ISSUER_ID" | tr -d ' \r\n')")
+          elif [ -n "$APPLE_ID" ]; then
+            NOTARY=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+          else
+            echo "::error::Signed, but no notarization secrets (APPLE_API_KEY_* or APPLE_ID/APPLE_TEAM_ID/APPLE_APP_PASSWORD)"; exit 1
+          fi
           ditto -c -k --keepParent out notarize.zip
-          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          for bundle in out/*; do xcrun stapler staple "$bundle"; done
+          xcrun notarytool submit notarize.zip "${NOTARY[@]}" --wait --output-format json | tee notary.json
+          grep -q '"status" *: *"Accepted"' notary.json || { echo "::error::Notarization not accepted: $(cat notary.json)"; \
+            xcrun notarytool log "$(sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p' notary.json | head -1)" "${NOTARY[@]}" || true; exit 1; }
+          rm -f AuthKey.p8 notarize.zip
+          for b in out/*; do xcrun stapler staple "$b"; xcrun stapler validate "$b"; done
+          echo "yes" > signed.txt
+          echo "::notice title=macOS::signed ($MACOS_SIGN_IDENTITY), notarized and stapled"
 
       - name: Zip (keeps bundle structure and signatures)
-        run: ditto -c -k --keepParent out "TrapWin Sample Mac.zip"
+        run: |
+          mkdir -p mac
+          ditto -c -k --keepParent out "mac/TrapWin Sampler Mac.zip"
+          cp signed.txt mac/
 
       - uses: actions/upload-artifact@v5
         with:
-          name: TrapWinSample-Mac
-          path: "TrapWin Sample Mac.zip"
+          name: TrapWinSampler-Mac
+          path: mac/
 
   package:
     needs: [windows, macos]
@@ -95,12 +145,32 @@ jobs:
       - uses: actions/download-artifact@v5
         with:
           path: artifacts
-      - name: Assemble trapwin.com folder
+      - name: Assemble trapwin.com folder (one shop ZIP per platform)
         run: |
-          mkdir -p "trapwin.com/TrapWin Sample/Windows" "trapwin.com/TrapWin Sample/Mac"
-          cp -R artifacts/TrapWinSample-Windows/* "trapwin.com/TrapWin Sample/Windows/"
-          cp "artifacts/TrapWinSample-Mac/TrapWin Sample Mac.zip" "trapwin.com/TrapWin Sample/Mac/"
-          cp packaging/INSTALL.txt "trapwin.com/TrapWin Sample/"
+          D="trapwin.com/TrapWin Sampler $VERSION"
+          mkdir -p "$D/Windows" "$D/macOS" "$D/Docs" "$D/Shop" stage/win stage/mac
+
+          # Windows: installer + notes + EULA
+          cp artifacts/TrapWinSampler-Windows/installer-out/*.exe stage/win/
+          cp "packaging/INSTALL - Windows.txt" EULA.txt THIRD-PARTY-LICENSES.txt stage/win/
+          (cd stage/win && zip -qry "$GITHUB_WORKSPACE/$D/Windows/TrapWinSampler-$VERSION-Windows.zip" .)
+
+          # macOS: signed bundles (or unsigned with a note) + notes + EULA
+          (cd stage/mac && unzip -q "../../artifacts/TrapWinSampler-Mac/TrapWin Sampler Mac.zip")
+          mv stage/mac/out/* stage/mac/ && rmdir stage/mac/out
+          cp "packaging/INSTALL - macOS.txt" stage/mac/
+          if [ "$(cat artifacts/TrapWinSampler-Mac/signed.txt)" = "yes" ]; then
+            MZ="TrapWinSampler-$VERSION-macOS.zip"
+          else
+            MZ="TrapWinSampler-$VERSION-macOS-UNSIGNED.zip"
+            cat packaging/MAC_UNSIGNED_NOTE.txt >> "stage/mac/INSTALL - macOS.txt"
+          fi
+          cp EULA.txt THIRD-PARTY-LICENSES.txt stage/mac/
+          (cd stage/mac && zip -qry --symlinks "$GITHUB_WORKSPACE/$D/macOS/$MZ" .)
+
+          cp README.md EULA.txt THIRD-PARTY-LICENSES.txt "$D/Docs/"
+          cp assets/marketing/*.png "$D/Shop/" 2>/dev/null || true
+          ls -R trapwin.com
       - uses: actions/upload-artifact@v5
         with:
           name: trapwin.com

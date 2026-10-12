@@ -1,4 +1,4 @@
-// Headless end-to-end check of TrapWin Sample: renders the editor to PNG and
+// Headless end-to-end check of TrapWin Sampler: renders the editor to PNG and
 // drives the whole chain (load -> analysis -> section loops / one-shots ->
 // editor -> preview -> MIDI -> drag export -> state restore -> tempo fix).
 //

@@ -100,7 +100,7 @@ void Vinyl::paint (juce::Graphics& g)
     drawLogo (g, juce::Rectangle<float> (lr * 1.72f, lr * 0.66f).withCentre (c.translated (0.0f, -lr * 0.3f)));
     g.setColour (text2);
     g.setFont (mono (lr * 0.13f, true).withExtraKerningFactor (0.24f));
-    g.drawText ("SAMPLE", juce::Rectangle<float> (lr * 1.4f, lr * 0.22f).withCentre (c.translated (0.0f, lr * 0.62f)), juce::Justification::centred, false);
+    g.drawText ("SAMPLER", juce::Rectangle<float> (lr * 1.4f, lr * 0.22f).withCentre (c.translated (0.0f, lr * 0.62f)), juce::Justification::centred, false);
     g.setColour (bg);
     g.fillEllipse (juce::Rectangle<float> (lr * 0.12f, lr * 0.12f).withCentre (c.translated (0.0f, lr * 0.3f)));
 

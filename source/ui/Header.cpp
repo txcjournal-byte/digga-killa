@@ -73,12 +73,12 @@ void Header::paint (juce::Graphics& g)
     const auto logoArea = wordmarkArea.withSizeKeepingCentre (wordmarkArea.getWidth(), 80.0f).withWidth (220.0f);
     drawLogo (g, logoArea, juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
 
-    const auto pill = juce::Rectangle<float> (logoArea.getRight() + 12.0f, logoArea.getCentreY() - 13.0f, 96.0f, 26.0f);
+    const auto pill = juce::Rectangle<float> (logoArea.getRight() + 12.0f, logoArea.getCentreY() - 13.0f, 112.0f, 26.0f);
     g.setColour (juce::Colour (0xffe6eaf2));
     g.fillRoundedRectangle (pill, 13.0f);
     g.setColour (well);
     g.setFont (mono (12.0f, true).withExtraKerningFactor (0.18f));
-    g.drawText ("SAMPLE", pill, juce::Justification::centred, false);
+    g.drawText ("SAMPLER", pill, juce::Justification::centred, false);
 
     // tempo readout: two lines, right aligned
     auto t = tempoArea.withSizeKeepingCentre (tempoArea.getWidth(), 40.0f);

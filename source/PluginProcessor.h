@@ -18,7 +18,7 @@ namespace ParamIDs
     inline constexpr auto volume = "volume";
 }
 
-/** TrapWin Sample: drop a song, get its loops and one-shots. */
+/** TrapWin Sampler: drop a song, get its loops and one-shots. */
 class TrapWinProcessor : public juce::AudioProcessor,
                          private juce::Timer
 {

@@ -1,4 +1,4 @@
-# TrapWin Sample — https://trapwin.com
+# TrapWin Sampler — https://trapwin.com
 
 VST3 / AU nástroj (Windows a Mac) pro trapové producenty. Přetáhneš na vinyl song nebo loop (WAV, MP3, AIFF, FLAC) a plugin ho celý rozebere:
 
@@ -14,26 +14,25 @@ Design odpovídá webu trapwin.com (šablona *TrapWin Chrome*): pozadí #04060A,
 ## Stažení a instalace
 
 GitHub Actions při každém pushi postaví:
-- **TrapWinSample-Windows:** VST3 + samostatná aplikace
-- **TrapWinSample-Mac:** universal (Apple Silicon + Intel), VST3 + AU + aplikace
-- **trapwin.com:** hotová složka s oběma verzemi a návodem `INSTALL.txt`
+- **TrapWinSampler-Windows:** VST3 + samostatná aplikace + instalátor (Inno Setup)
+- **TrapWinSampler-Mac:** universal (Apple Silicon + Intel), VST3 + AU + aplikace
+- **trapwin.com:** složka pro e-shop: `Windows/TrapWinSampler-1.0.0-Windows.zip` (instalátor, návod, EULA) a `macOS/TrapWinSampler-1.0.0-macOS.zip` (podepsané bundly, návod, EULA; bez podpisu má název `-UNSIGNED`)
 
 Stáhneš je na stránce běhu workflow (Actions → Build → Artifacts).
 
 ### Podpis pro Mac
 
-Workflow Mac verzi podepíše certifikátem Developer ID a nechá ji notarizovat u Applu, když jsou v repozitáři (Settings → Secrets → Actions) tyto secrets:
+Stejné secrets jako u ostatních TrapWin pluginů (např. TrapWin Effector). Vlož je do tohoto repozitáře (Settings → Secrets and variables → Actions); klíče máš zálohované v `Dokumenty\TrapWin-signing`:
 
 | Secret | Co to je |
 |---|---|
-| `MACOS_CERTIFICATE_P12` | certifikát *Developer ID Application* exportovaný z Klíčenky jako .p12, zakódovaný base64 (`base64 -i cert.p12`) |
-| `MACOS_CERTIFICATE_PASSWORD` | heslo k .p12 |
-| `MACOS_SIGNING_IDENTITY` | např. `Developer ID Application: Jméno (TEAMID)` |
-| `APPLE_ID` | e-mail Apple ID vývojářského účtu |
-| `APPLE_TEAM_ID` | Team ID (developer.apple.com → Membership) |
-| `APPLE_APP_PASSWORD` | app-specific heslo (appleid.apple.com → Sign-In and Security) |
+| `MACOS_CERT_P12` | certifikát *Developer ID Application* jako .p12, zakódovaný base64 |
+| `MACOS_CERT_PASSWORD` | heslo k .p12 |
+| `MACOS_SIGN_IDENTITY` | volitelné, např. `Developer ID Application: Jméno (TEAMID)` (jinak se vezme z .p12) |
+| `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | notarizace přes App Store Connect API klíč |
+| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | nebo notarizace přes Apple ID a app-specific heslo |
 
-Bez nich se Mac verze postaví nepodepsaná. Otevře se přes pravé tlačítko → Otevřít.
+Bez nich se Mac verze postaví nepodepsaná (ZIP s koncovkou `-UNSIGNED` a návodem, jak ji otevřít).
 
 ## Build
 
@@ -55,7 +54,7 @@ cmake --build build
 
 Volby: `-DTRAPWIN_JUCE_PATH=/cesta/k/JUCE` (lokální JUCE), `-DTRAPWIN_BUILD_TOOLS=ON` (end-to-end test `TrapWinTest <složka> <song.wav> [analyse]`, který bez DAW projde načtení → analýzu → loopy/shoty → editor → přehrávání → WAV/MIDI export → uložení a obnovení stavu a vykreslí UI do PNG).
 
-Kontrola pluginu: `pluginval --strictness-level 10 --validate "TrapWin Sample.vst3"` (prochází).
+Kontrola pluginu: `pluginval --strictness-level 10 --validate "TrapWin Sampler.vst3"` (prochází).
 
 ## Struktura
 
@@ -74,7 +73,8 @@ source/
   playback/           SamplePlayer (náhled songu), ClipPlayer (náhledy, MIDI)
   ui/                 Theme + TrapWinLookAndFeel (design webu), Header, Vinyl,
                       SampleList, EditorPanel, FormatSwitch, MainView
-packaging/INSTALL.txt návod do balíčku trapwin.com
+packaging/       návody k instalaci do ZIPů pro e-shop
+installer/       Windows instalátor (Inno Setup)
 tools/                Snapshot.cpp (TrapWinTest), export_basic_pitch.py
 ```
 

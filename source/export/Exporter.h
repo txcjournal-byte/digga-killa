@@ -13,7 +13,7 @@ juce::File writeWav (const juce::AudioBuffer<float>& audio, double sampleRate, c
 /** "TrapWin_Drop_16bars_140bpm_F#m" */
 juce::String makeFileName (const juce::String& tag, double bpm, const juce::String& key);
 
-/** Where dragged files are rendered: <temp>/TrapWin Sample */
+/** Where dragged files are rendered: <temp>/TrapWin Sampler */
 juce::File getExportFolder();
 
 } // namespace digga::exporter

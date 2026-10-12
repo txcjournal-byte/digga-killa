@@ -7,7 +7,7 @@ namespace digga::exporter
 
 juce::File getExportFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("TrapWin Sample");
+    return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("TrapWin Sampler");
 }
 
 juce::String makeFileName (const juce::String& tag, double bpm, const juce::String& key)
