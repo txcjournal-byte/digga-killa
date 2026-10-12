@@ -95,12 +95,17 @@ public:
         no stems), meaning: transcribe the clip itself. */
     std::function<AudioPtr()> pitchedSource (int id) const;
 
+    /** Loops: where the clip as heard is chopped for MIDI slicing (sample
+        positions, first is 0); null for one-shots. Cached per clip audio. */
+    std::shared_ptr<const std::vector<int>> getChops (int id) const;
+
 private:
     void startAnalysis();
     void startGeneration();
     void renderEditFor (int id);
     void applyOverrideTempo();
     void publishBank();
+    std::shared_ptr<const std::vector<int>> chopsFor (const AudioPtr& audio) const;
     void storeState();
 
     JobQueue& jobs;
@@ -132,6 +137,8 @@ private:
     juce::uint32 generation = 0;
     std::shared_ptr<std::atomic<juce::uint32>> latestGeneration = std::make_shared<std::atomic<juce::uint32>> (0u);   // read by workers
 
+    mutable std::map<const void*, std::pair<std::weak_ptr<const juce::AudioBuffer<float>>,
+                                            std::shared_ptr<const std::vector<int>>>> chopCache;   // message thread
     mutable juce::CriticalSection stateLock;
     juce::ValueTree savedState { "Engine" };
 

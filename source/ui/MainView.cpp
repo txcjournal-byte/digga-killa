@@ -88,6 +88,7 @@ MainView::MainView (TrapWinProcessor& p) : processor (p)
     };
     editor.onPlay = [this] (int id) { togglePreview (id); };
     editor.onDragOut = [this] (int id) { dragOut (id); };
+    editor.onDragChops = [this] (int id) { dragChops (id); };
 
     processor.getSampleStore().addChangeListener (this);
     engine.addChangeListener (this);
@@ -363,6 +364,40 @@ void MainView::dragOut (int id)
     }
     juce::MouseCursor::hideWaitCursor();
 
+    if (file.existsAsFile())
+        juce::DragAndDropContainer::performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this);
+}
+
+void MainView::dragChops (int id)
+{
+    auto& engine = processor.getEngine();
+    const auto* item = engine.find (id);
+    const auto chops = engine.getChops (id);
+    if (item == nullptr || item->edited == nullptr || chops == nullptr || chops->empty())
+        return;
+
+    // one note per chop, placed where the chop plays in the loop: on the
+    // TrapWin Sampler channel (this loop selected) it sounds like the WAV
+    const double rate = engine.getSampleRate();
+    const int length = item->edited->getNumSamples();
+    std::vector<midi::Note> notes;
+    for (size_t k = 0; k < chops->size(); ++k)
+    {
+        midi::Note n;
+        n.startSeconds = (*chops)[k] / rate;
+        n.endSeconds = (k + 1 < chops->size() ? (*chops)[k + 1] : length) / rate;
+        n.pitch = chopBaseNote + (int) k;
+        n.amplitude = 1.0f;   // full velocity = the level of the WAV
+        notes.push_back (n);
+    }
+
+    const auto* a = engine.getAnalysis();
+    midi::ExportOptions options;
+    options.bpm = engine.getProjectBpm();
+    options.lengthSeconds = item->lengthSeconds (rate);
+    const auto file = midi::writeToTempFile (notes, options,
+                                             exporter::makeFileName (item->fileTag() + "_Chops", options.bpm,
+                                                                     a != nullptr ? a->keyName : juce::String()));
     if (file.existsAsFile())
         juce::DragAndDropContainer::performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this);
 }

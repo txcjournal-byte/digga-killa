@@ -34,6 +34,11 @@ namespace audio
     juce::AudioBuffer<float> resample (const juce::AudioBuffer<float>& source, int newLength);
 
     juce::String formatDuration (double seconds);
+
+    /** Where a loop should be chopped for MIDI slicing: sample positions of
+        the hits (onsets), snapped to the 1/16 grid when bpm > 0, always
+        starting at 0, at most maxChops. */
+    std::vector<int> detectChops (const juce::AudioBuffer<float>& buffer, double sampleRate, double bpm, int maxChops = 64);
 }
 
 } // namespace digga

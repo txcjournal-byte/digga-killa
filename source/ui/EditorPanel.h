@@ -14,7 +14,7 @@ class DragPill : public juce::Component,
                  public juce::SettableTooltipClient
 {
 public:
-    DragPill();
+    explicit DragPill (juce::String labelText = "DRAG TO DAW");
     std::function<void()> onDragOut;
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
@@ -22,6 +22,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override { started = false; }
 private:
+    juce::String label;
     bool hover = false, started = false;
 };
 
@@ -51,7 +52,7 @@ public:
     MidiView& getMidiView() noexcept { return midiView; }
 
     std::function<void (int id, const EditSettings&)> onEdit;
-    std::function<void (int id)> onPlay, onDragOut;
+    std::function<void (int id)> onPlay, onDragOut, onDragChops;
     std::function<void (int id, double fraction)> onAudition;   // click on the wave
     std::function<void (View)> onViewChanged;
     std::function<void (int id, const std::array<float, 4>& levels)> onStemMix;
@@ -93,6 +94,7 @@ private:
     juce::TextButton zoomOut { "-" }, zoomIn { "+" }, zoomFit { "Fit" }, zoomSel { "Sel" }, snapButton;
     juce::TextButton dragRaw { "Raw" }, dragFx { "FX" };
     DragPill drag;
+    DragPill dragChops { "DRAG CHOPS" };
     std::array<LabelledSlider, 4> sliders;
 
     WaveformEditor wave;

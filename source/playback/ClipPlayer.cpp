@@ -26,7 +26,7 @@ ClipPlayer::Voice& ClipPlayer::allocateVoice() noexcept
 }
 
 void ClipPlayer::startVoice (Voice& v, const ClipEntry& clip, bool isPreview, int note, double rate, float gain,
-                             double startPosition) noexcept
+                             double startPosition, double endPosition) noexcept
 {
     v.clip = &clip;
     v.clipId = clip.id;
@@ -35,7 +35,9 @@ void ClipPlayer::startVoice (Voice& v, const ClipEntry& clip, bool isPreview, in
     v.gain = gain;
     v.note = note;
     v.active = true;
-    v.loop = clip.isLoop;
+    v.end = endPosition;
+    v.chop = endPosition >= 0.0;
+    v.loop = clip.isLoop && ! v.chop;
     v.isPreview = isPreview;
     v.fadeIn = fadeLength;
     v.fadeOut = -1;
@@ -105,6 +107,21 @@ void ClipPlayer::noteOn (int note, float velocity) noexcept
 
     const float gain = std::pow (juce::jlimit (0.0f, 1.0f, velocity), 0.6f);
 
+    // chops: each note from chopBaseNote plays one slice of the loop
+    if (clip->isLoop && clip->chops != nullptr && note >= chopBaseNote
+        && note < chopBaseNote + (int) clip->chops->size())
+    {
+        const auto& chops = *clip->chops;
+        const auto k = (size_t) (note - chopBaseNote);
+        const double start = (double) chops[k];
+        const double end = k + 1 < chops.size() ? (double) chops[k + 1] : (double) clip->audio->getNumSamples();
+        for (auto& v : voices)
+            if (v.active && v.chop && v.note == note)
+                release (v);
+        startVoice (allocateVoice(), *clip, false, note, 1.0, gain, start, end);
+        return;
+    }
+
     if (clip->isLoop)
     {
         for (auto& v : voices)
@@ -122,7 +139,7 @@ void ClipPlayer::noteOn (int note, float velocity) noexcept
 void ClipPlayer::noteOff (int note) noexcept
 {
     for (auto& v : voices)
-        if (v.active && ! v.isPreview && v.note == note && v.loop)
+        if (v.active && ! v.isPreview && v.note == note && (v.loop || v.chop))
             release (v);
 }
 
@@ -167,6 +184,10 @@ void ClipPlayer::render (juce::AudioBuffer<float>& output, int startSample, int 
                 }
                 v.position -= length;
             }
+
+            // chops fade out just before the next chop starts
+            if (v.chop && v.fadeOut < 0 && v.position >= v.end - fadeLength * v.rate)
+                v.fadeOut = fadeLength;
 
             if (v.fadeOut == 0)
             {

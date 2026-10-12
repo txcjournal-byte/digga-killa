@@ -6,7 +6,7 @@ namespace digga
 using namespace theme;
 
 // ---------------------------------------------------------------------------- drag pill
-DragPill::DragPill()
+DragPill::DragPill (juce::String labelText) : label (std::move (labelText))
 {
     setMouseCursor (juce::MouseCursor::DraggingHandCursor);
     setTooltip ("Drag into FL Studio, Ableton, Logic... (WAV or MIDI, see top right)");
@@ -23,7 +23,7 @@ void DragPill::paint (juce::Graphics& g)
         for (int row = 0; row < 3; ++row)
             g.fillEllipse (r.getX() + 20.0f + (float) col * 6.0f, r.getCentreY() + (float) (row - 1) * 6.0f - 1.6f, 3.2f, 3.2f);
     g.setFont (display (14.0f).withExtraKerningFactor (0.04f));
-    g.drawText ("DRAG TO DAW", r.withTrimmedLeft (30.0f), juce::Justification::centred, false);
+    g.drawText (label, r.withTrimmedLeft (30.0f), juce::Justification::centred, false);
     g.endTransparencyLayer();
 }
 
@@ -63,6 +63,10 @@ EditorPanel::EditorPanel()
     reset.setTooltip ("Back to the sample as it was cut (crop, fades, pitch, effects, stem mix)");
     reset.onClick = [this] { edit = {}; syncControls(); commit(); };
     drag.onDragOut = [this] { if (onDragOut && id >= 0) onDragOut (id); };
+    dragChops.onDragOut = [this] { if (onDragChops && id >= 0 && isLoop) onDragChops (id); };
+    dragChops.setTooltip ("Drag MIDI that plays this loop in chops: put it on the TrapWin Sampler channel "
+                          "(this loop selected) and it sounds like the WAV - then move, repeat or delete chops "
+                          "in your piano roll. Chop 1 = C5 in FL Studio.");
 
     // view tabs
     waveTab.onClick = [this] { setView (View::wave); };
@@ -94,7 +98,7 @@ EditorPanel::EditorPanel()
     dragRaw.onClick = [this] { dragWithFx = false; syncControls(); };
     dragFx.onClick = [this] { dragWithFx = true; syncControls(); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag, &waveTab, &midiTab, &fxTab,
+    for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag, &dragChops, &waveTab, &midiTab, &fxTab,
                                                              &zoomOut, &zoomIn, &zoomFit, &zoomSel, &snapButton, &dragRaw, &dragFx,
                                                              &wave, &midiView, &fxRack })
         addAndMakeVisible (c);
@@ -245,6 +249,7 @@ void EditorPanel::setItem (const SampleItem* item, double rate, double newBpm)
     for (auto* c : std::initializer_list<juce::Component*> { &play, &reverse, &reset, &drag, &zoomOut, &zoomIn, &zoomFit,
                                                              &zoomSel, &snapButton, &dragRaw, &dragFx })
         c->setEnabled (item != nullptr);
+    dragChops.setEnabled (item != nullptr && isLoop);
     for (auto& s : sliders)
         s.slider.setEnabled (item != nullptr);
     syncControls();
@@ -320,6 +325,8 @@ void EditorPanel::resized()
     headerArea = r.removeFromTop (44);
     auto top = headerArea;
     drag.setBounds (top.removeFromRight (190).withSizeKeepingCentre (190, 40));
+    top.removeFromRight (8);
+    dragChops.setBounds (top.removeFromRight (170).withSizeKeepingCentre (170, 40));
     top.removeFromRight (8);
     dragFx.setBounds (top.removeFromRight (46).withSizeKeepingCentre (46, 30));
     top.removeFromRight (4);
@@ -416,7 +423,7 @@ void EditorPanel::paint (juce::Graphics& g)
     }
     else
     {
-        auto label = header.removeFromLeft (juce::jmax (120.0f, header.getWidth() - 640.0f));
+        auto label = header.removeFromLeft (juce::jmax (120.0f, header.getWidth() - 790.0f));
         fillChrome (g, textPath (title.toUpperCase(), display (28.0f),
                                  label.removeFromTop (27.0f).withWidth (juce::jmin (label.getWidth(), 17.0f * (float) title.length() + 40.0f))), true);
         const juce::String dot (juce::CharPointer_UTF8 ("  \xc2\xb7  "));

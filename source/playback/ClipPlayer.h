@@ -14,7 +14,14 @@ struct ClipEntry
     AudioPtr audio;
     bool isLoop = false;
     double beats = 0.0;   // loop length in beats at project tempo
+    /** Loops: chop starts (samples) for MIDI slicing; note chopBaseNote + k
+        plays chop k up to the next one. */
+    std::shared_ptr<const std::vector<int>> chops;
 };
+
+/** First note of the chops (C5 in FL Studio, C4 in most other DAWs). Notes
+    below it play the whole loop as before. */
+constexpr int chopBaseNote = 60;
 
 /** Immutable set of playable clips handed to the audio thread. */
 struct ClipBank
@@ -79,13 +86,14 @@ private:
         double rate = 1.0;
         float gain = 1.0f;
         int note = -1;
-        bool active = false, loop = false, isPreview = false;
+        double end = -1.0;   // chops: stop here (samples), < 0 = clip end
+        bool active = false, loop = false, isPreview = false, chop = false;
         int fadeIn = 0, fadeOut = -1;
         juce::uint32 order = 0;
     };
 
     Voice& allocateVoice() noexcept;
-    void startVoice (Voice&, const ClipEntry&, bool isPreview, int note, double rate, float gain, double startPosition) noexcept;
+    void startVoice (Voice&, const ClipEntry&, bool isPreview, int note, double rate, float gain, double startPosition, double endPosition = -1.0) noexcept;
     void release (Voice&) noexcept;
 
     LockFreeHandoff<ClipBank> bank;

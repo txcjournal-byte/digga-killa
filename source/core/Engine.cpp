@@ -121,6 +121,26 @@ bool Engine::hasStemModel() const
     return stems::Separator::findModelFile().existsAsFile();
 }
 
+std::shared_ptr<const std::vector<int>> Engine::chopsFor (const AudioPtr& audio) const
+{
+    if (audio == nullptr)
+        return {};
+
+    for (auto it = chopCache.begin(); it != chopCache.end();)
+        it = it->second.first.expired() ? chopCache.erase (it) : std::next (it);
+
+    auto& entry = chopCache[audio.get()];
+    if (entry.second == nullptr || entry.first.expired())
+        entry = { audio, std::make_shared<const std::vector<int>> (audio::detectChops (*audio, sampleRate, generatedBpm)) };
+    return entry.second;
+}
+
+std::shared_ptr<const std::vector<int>> Engine::getChops (int id) const
+{
+    const auto* item = find (id);
+    return item != nullptr && item->kind == ClipKind::loop ? chopsFor (item->edited) : nullptr;
+}
+
 std::function<AudioPtr()> Engine::pitchedSource (int id) const
 {
     const auto* item = find (id);
@@ -622,6 +642,8 @@ void Engine::publishBank()
         entry.audio = item.edited;
         entry.isLoop = item.kind == ClipKind::loop;
         entry.beats = entry.isLoop && generatedBpm > 0.0 ? item.edited->getNumSamples() / sampleRate * generatedBpm / 60.0 : 0.0;
+        if (entry.isLoop)
+            entry.chops = chopsFor (item.edited);
         bank->entries.push_back (std::move (entry));
     }
     std::sort (bank->entries.begin(), bank->entries.end(), [] (const ClipEntry& a, const ClipEntry& b) { return a.id < b.id; });

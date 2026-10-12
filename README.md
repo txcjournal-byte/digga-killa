@@ -14,7 +14,8 @@ VST3 / AU nástroj (Windows a Mac) pro trapové producenty. Přetáhneš na viny
 - **Velikost okna.** Otevře se zhruba na 70 % obrazovky (notebook i monitor), dá se zvětšit / zmenšit, vše zůstává čitelné.
 - **Přetažení do DAW kdykoli.** Řádek nebo *DRAG TO DAW* do FL Studia, Abletonu, Logicu…, jako WAV nebo MIDI (Basic Pitch, i akordy).
 - **EXPORT ALL** uloží všechny vzorky do složky, roztříděné jako záložky.
-- **Piano Roll.** Vybraný vzorek hraje z MIDI: one-shoty chromaticky (nota 60 = původní výška), loopy spouští nota.
+- **Piano Roll.** Vybraný vzorek hraje z MIDI: one-shoty chromaticky (nota 60 = původní výška), loopy spouští nota pod 60.
+- **DRAG CHOPS.** Loop rozsekaný podle úderů (snap na 1/16) jako MIDI: nota 60 + k přehraje chop k vybraného loopu. Na kanálu TrapWin Sampler zní MIDI jako WAV a chopy jde v piano rollu přeskládat.
 - **Tempo a tónina.** Tempo z bicích, tónina z melodie a basy; tempo projektu z DAW; ×2 / ÷2 a ruční BPM.
 
 Design odpovídá webu trapwin.com (šablona *TrapWin Chrome*): pozadí #04060A, chromový gradient, modrá záře #9FC3FF, písma Archivo a IBM Plex Mono.

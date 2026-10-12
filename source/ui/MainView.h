@@ -35,6 +35,7 @@ private:
     void togglePreview (int id);
     void showRowMenu (int id);
     void dragOut (int id);
+    void dragChops (int id);
     void prefetchMidi();
     void exportAll();
     void updateMidiView();
